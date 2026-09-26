@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Matches Scanner</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">DERIV • SEPARATE PROJECT</div>
+        <h1>Matches Scanner</h1>
+        <p class="muted">Matches-only market scanner with frozen signals.</p>
+      </div>
+      <span id="feedBadge" class="badge offline">Feed offline</span>
+    </header>
+
+    <section class="panel">
+      <div class="section-title">
+        <h2>Market feed</h2>
+        <span id="tickCount">0 ticks</span>
+      </div>
+      <div class="row">
+        <button id="connectBtn" class="primary">Connect market data</button>
+        <button id="disconnectBtn" class="secondary" disabled>Disconnect</button>
+      </div>
+      <p id="feedMessage" class="status">Not connected. Public market data does not require your API token.</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-title">
+        <h2>Markets</h2>
+        <button id="selectAllBtn" class="link-btn">Select all</button>
+      </div>
+      <div id="markets" class="market-grid">
+        <div class="empty">Connect to load available synthetic markets.</div>
+      </div>
+    </section>
+
+    <section class="panel scanner">
+      <div class="section-title">
+        <h2>Matches scan</h2>
+        <span class="threshold">TRADE NOW ≥ 75%</span>
+      </div>
+      <button id="scanBtn" class="primary wide" disabled>Scan selected markets</button>
+      <div id="results" class="results">
+        <div class="empty">No frozen signal yet.</div>
+      </div>
+      <p class="note"><strong>Important:</strong> Signal strength is a scanner score, not a guaranteed next-tick win probability. A signal is frozen when generated so it cannot change while you switch to Deriv Bot.</p>
+    </section>
+
+    <section class="panel auth">
+      <div class="section-title">
+        <h2>Account connection</h2>
+        <span class="planned">Stage 2</span>
+      </div>
+      <div class="fields">
+        <label>Deriv API token
+          <input id="token" type="password" autocomplete="off" placeholder="Enter locally — never stored in GitHub">
+        </label>
+        <label>App ID
+          <input id="appId" inputmode="numeric" placeholder="App ID">
+        </label>
+        <label>Account ID
+          <input id="accountId" autocomplete="off" placeholder="Account ID">
+        </label>
+      </div>
+      <p class="status">Authenticated contract monitoring is intentionally separate from the public market feed. Your token is not committed to this repository.</p>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
