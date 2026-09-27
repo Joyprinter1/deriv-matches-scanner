@@ -121,7 +121,7 @@ function handleMessage(data) {
         if (!Number.isFinite(quote)) return;
         const text = String(price);
         const decimals = text.includes(".") ? text.split(".")[1].length : 0;
-        digits.push({digit:Number(text.replace(/\\D/g,"").slice(-1)),epoch:times[i],quote});
+        digits.push({digit:Number(text.replace(/\D/g,"").slice(-1)),epoch:times[i],quote});
       });
       state.ticks.set(symbol,digits.slice(-WINDOW));
       updateTickCount();
@@ -314,3 +314,7 @@ function disconnectApi(update=true) {
 }
 apiConnectBtn.addEventListener("click",connectApi);
 apiDisconnectBtn.addEventListener("click",()=>disconnectApi());
+
+connectBtn.addEventListener("click", connect);
+disconnectBtn.addEventListener("click", disconnect);
+scanBtn.addEventListener("click", scan);
