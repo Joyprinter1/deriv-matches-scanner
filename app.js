@@ -67,8 +67,8 @@ function handleMessage(data) {
     state.symbols = list;
     renderMarkets();
     list.forEach(s => {
-      state.ticks.set(s.symbol, []);
-      send({ ticks: s.symbol, subscribe: 1 });
+      state.ticks.set(s.underlying_symbol, []);
+      send({ ticks: s.underlying_symbol, subscribe: 1 });
     });
     setFeedStatus(true, list.length ? "Live market feed connected." : "Connected, but no matching synthetic markets were returned.");
   }
@@ -77,8 +77,10 @@ function handleMessage(data) {
     const quote = Number(data.tick.quote);
     if (!Number.isFinite(quote)) return;
     const digits = state.ticks.get(symbol) || [];
-    const pip = Number.isInteger(data.tick.pip_size) ? data.tick.pip_size : inferPipSize(quote);
-    const digit = extractLastDigit(quote, pip);
+    const pipSize = Number.isFinite(Number(data.tick.pip_size))
+      ? Number(data.tick.pip_size)
+      : inferPipSize(quote);
+    const digit = extractLastDigit(quote, pipSize);
     digits.push({ digit, epoch: data.tick.epoch, quote });
     if (digits.length > WINDOW) digits.splice(0, digits.length - WINDOW);
     state.ticks.set(symbol, digits);
@@ -104,8 +106,10 @@ function renderMarkets() {
     return;
   }
   marketsEl.innerHTML = state.symbols.map(s => {
-    const checked = state.selected.has(s.symbol) ? "checked" : "";
-    return '<label class="market"><input type="checkbox" data-symbol="' + escapeHtml(s.symbol) + '" ' + checked + '> <span>' + escapeHtml(s.display_name || s.symbol) + '</span></label>';
+    const symbol = s.underlying_symbol;
+    const name = s.underlying_symbol_name || symbol;
+    const checked = state.selected.has(symbol) ? "checked" : "";
+    return '<label class="market"><input type="checkbox" data-symbol="' + escapeHtml(symbol) + '" ' + checked + '> <span>' + escapeHtml(name) + '</span></label>';
   }).join("");
   marketsEl.querySelectorAll("input").forEach(input => input.addEventListener("change", e => {
     const symbol = e.target.dataset.symbol;
@@ -181,7 +185,7 @@ connectBtn.addEventListener("click", connect);
 disconnectBtn.addEventListener("click", disconnect);
 scanBtn.addEventListener("click", scan);
 $("selectAllBtn").addEventListener("click", () => {
-  state.symbols.forEach(s => state.selected.add(s.symbol));
+  state.symbols.forEach(s => state.selected.add(s.underlying_symbol));
   renderMarkets();
   scanBtn.disabled = !state.connected || state.selected.size === 0;
 });
