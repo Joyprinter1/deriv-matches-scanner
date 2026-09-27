@@ -28,6 +28,14 @@ const toggleMarketsBtn = $("toggleMarketsBtn");
 const marketsWrap = $("marketsWrap");
 const marketSummary = $("marketSummary");
 const clearAllBtn = $("clearAllBtn");
+const scanProgress = $("scanProgress");
+const scanSeconds = $("scanSeconds");
+const progressBar = $("progressBar");
+const marketStatus = $("marketStatus");
+const apiStatus = $("apiStatus");
+const botStatus = $("botStatus");
+const apiConnectBtn = $("apiConnectBtn");
+const apiDisconnectBtn = $("apiDisconnectBtn");
 
 function setFeedStatus(online, message) {
   state.connected = online;
