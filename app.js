@@ -40,7 +40,7 @@ function connect() {
   feedMessage.textContent = "Connecting to Deriv public market data…";
   state.ws.onopen = () => {
     setFeedStatus(true, "Connected. Loading available synthetic markets…");
-    send({ active_symbols: "brief", product_type: "basic", req_id: 1 });
+    send({ active_symbols: "brief", req_id: 1 });
   };
   state.ws.onmessage = event => handleMessage(JSON.parse(event.data));
   state.ws.onerror = () => setFeedStatus(false, "WebSocket error. Check the browser/network connection and try again.");
