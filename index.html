@@ -53,7 +53,12 @@
         <h2>Matches scan</h2>
         <span class="threshold">TRADE NOW ≥ 75%</span>
       </div>
-      <button id="scanBtn" class="primary wide" disabled>Scan selected markets</button>
+      <button id="scanBtn" class="primary wide" disabled>Scan all Matches markets</button>
+      <div id="scanProgress" class="scan-progress hidden">
+        <div class="scan-progress-top"><strong id="scanStatus">Scanning markets…</strong><span id="scanSeconds">25s</span></div>
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        <p class="note">Collecting live ticks before producing a frozen signal.</p>
+      </div>
       <div id="results" class="results">
         <div class="empty">No frozen signal yet.</div>
       </div>
@@ -61,6 +66,11 @@
     </section>
 
     <section class="panel auth">
+      <div class="connection-statuses">
+        <div><span>Market data</span><strong id="marketStatus">Disconnected</strong></div>
+        <div><span>Deriv API</span><strong id="apiStatus">Not connected</strong></div>
+        <div><span>Deriv Bot monitor</span><strong id="botStatus">Not connected</strong></div>
+      </div>
       <div class="section-title">
         <h2>Account connection</h2>
         <span class="planned">Stage 2</span>
@@ -75,8 +85,10 @@
         <label>Account ID
           <input id="accountId" autocomplete="off" placeholder="Account ID">
         </label>
+        <button id="apiConnectBtn" class="primary wide">Connect Deriv API</button>
+        <button id="apiDisconnectBtn" class="secondary wide" disabled>Disconnect API</button>
       </div>
-      <p class="status">Authenticated contract monitoring is intentionally separate from the public market feed. Your token is not committed to this repository.</p>
+      <p class="status">API authentication uses your token, App ID and account ID locally. The scanner does not place trades. After authentication, the Bot monitor watches the account for contracts opened manually in Deriv Bot. Your token is not committed to this repository.</p>
     </section>
   </main>
   <script src="app.js"></script>
