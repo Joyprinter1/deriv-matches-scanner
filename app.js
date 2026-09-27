@@ -62,8 +62,14 @@ function handleMessage(data) {
   }
   if (data.msg_type === "active_symbols") {
     const list = (data.active_symbols || [])
-      .filter(s => /volatility|jump/i.test(s.display_name || ""))
-      .sort((a,b) => (a.display_name || "").localeCompare(b.display_name || ""));
+      .filter(s => {
+        const name = String(s.underlying_symbol_name || s.display_name || "").toLowerCase();
+        const symbol = String(s.underlying_symbol || s.symbol || "").toLowerCase();
+        return /volatility|jump/.test(name) ||
+          /^(r_10|r_25|r_50|r_75|r_100|1hz\d+v|jd\d+)/i.test(symbol);
+      })
+      .sort((a,b) => String(a.underlying_symbol_name || a.display_name || a.underlying_symbol || "")
+        .localeCompare(String(b.underlying_symbol_name || b.display_name || b.underlying_symbol || "")));
     state.symbols = list;
     renderMarkets();
     list.forEach(s => {
@@ -73,7 +79,7 @@ function handleMessage(data) {
     setFeedStatus(true, list.length ? "Live market feed connected." : "Connected, but no matching synthetic markets were returned.");
   }
   if (data.msg_type === "tick" && data.tick) {
-    const symbol = data.tick.symbol;
+    const symbol = data.tick.underlying_symbol || data.tick.symbol;
     const quote = Number(data.tick.quote);
     if (!Number.isFinite(quote)) return;
     const digits = state.ticks.get(symbol) || [];
