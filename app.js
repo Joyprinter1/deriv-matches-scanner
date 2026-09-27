@@ -1,303 +1,58 @@
-const WS_URLS = ["wss://api.derivws.com/trading/v1/options/ws/public","wss://ws.binaryws.com/websockets/v3"];
-let wsAttempt = 0;
-const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
-const TRADE_THRESHOLD = 75;
-const WINDOW = 120;
-const SYNTHETIC_MARKETS = [
-  ["1HZ10V","Volatility 10 (1s)"],["1HZ15V","Volatility 15 (1s)"],["1HZ25V","Volatility 25 (1s)"],
-  ["1HZ30V","Volatility 30 (1s)"],["1HZ50V","Volatility 50 (1s)"],["1HZ75V","Volatility 75 (1s)"],
-  ["1HZ90V","Volatility 90 (1s)"],["1HZ100V","Volatility 100 (1s)"],
-  ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
-  ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]
-];
+const WS_URL="wss://ws.binaryws.com/websockets/v3";
+const TRADE_THRESHOLD=75,WINDOW=120,SCAN_SECONDS=25;
+const MARKETS=[
+["1HZ10V","Volatility 10 (1s)"],["1HZ15V","Volatility 15 (1s)"],["1HZ25V","Volatility 25 (1s)"],["1HZ30V","Volatility 30 (1s)"],
+["1HZ50V","Volatility 50 (1s)"],["1HZ75V","Volatility 75 (1s)"],["1HZ90V","Volatility 90 (1s)"],["1HZ100V","Volatility 100 (1s)"],
+["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
+["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]];
+const $=id=>document.getElementById(id);
+const state={ws:null,connected:false,selected:new Set(MARKETS.map(x=>x[0])),ticks:new Map(),scanning:false,apiWs:null,apiPoll:null,contracts:new Set()};
+const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
+const marketsWrap=$("marketsWrap"),marketsEl=$("markets"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
+const scanProgress=$("scanProgress"),scanSeconds=$("scanSeconds"),progressBar=$("progressBar"),scanState=$("scanState");
+const apiConnectBtn=$("apiConnectBtn"),apiDisconnectBtn=$("apiDisconnectBtn");
 
-const state = {
-  ws: null,
-  connected: false,
-  symbols: [],
-  selected: new Set(),
-  ticks: new Map(),
-  frozen: [],
-  scanning: false,
-  apiWs: null,
-  apiPoll: null,
-  monitoredContracts: new Set()
-};
-
-const $ = id => document.getElementById(id);
-const feedBadge = $("feedBadge");
-const feedMessage = $("feedMessage");
-const marketsEl = $("markets");
-const resultsEl = $("results");
-const connectBtn = $("connectBtn");
-const disconnectBtn = $("disconnectBtn");
-const scanBtn = $("scanBtn");
-const toggleMarketsBtn = $("toggleMarketsBtn");
-const marketsWrap = $("marketsWrap");
-const marketSummary = $("marketSummary");
-const clearAllBtn = $("clearAllBtn");
-const scanProgress = $("scanProgress");
-const scanSeconds = $("scanSeconds");
-const progressBar = $("progressBar");
-const marketStatus = $("marketStatus");
-const apiStatus = $("apiStatus");
-const botStatus = $("botStatus");
-const apiConnectBtn = $("apiConnectBtn");
-const apiDisconnectBtn = $("apiDisconnectBtn");
-
-function setFeedStatus(online, message) {
-  state.connected = online;
-  marketStatus.textContent = online ? "Connected" : "Disconnected";
-  marketStatus.className = online ? "online" : "";
-  feedBadge.textContent = online ? "Feed online" : "Feed offline";
-  feedBadge.className = "badge " + (online ? "online" : "offline");
-  feedMessage.textContent = message;
-  connectBtn.disabled = online;
-  disconnectBtn.disabled = !online;
-  scanBtn.disabled = !online || state.selected.size === 0;
+function setFeed(on,msg){state.connected=on;feedBadge.textContent=on?"LIVE":"OFFLINE";feedBadge.className="live-pill "+(on?"online":"offline");$("marketStatus").textContent=on?"Connected":"Disconnected";$("marketStatus2").textContent=on?"ONLINE":"OFFLINE";$("marketStatus2").className=on?"online":"";feedMessage.textContent=msg;connectBtn.disabled=on;disconnectBtn.disabled=!on;scanBtn.disabled=!on||!state.selected.size}
+function send(o){if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send(JSON.stringify(o))}
+function connect(){
+ if(state.ws)try{state.ws.close()}catch(e){}
+ feedMessage.textContent="Connecting to live Deriv market data…";connectBtn.disabled=true;
+ state.ws=new WebSocket(WS_URL);
+ state.ws.onopen=()=>{state.connected=true;MARKETS.forEach(([s])=>state.ticks.set(s,[]));renderMarkets();MARKETS.forEach(([s],i)=>{send({ticks_history:s,count:WINDOW,end:"latest",style:"ticks",req_id:1000+i});send({ticks:s,subscribe:1,req_id:2000+i})});setFeed(true,"Live market feed connected. Loading ticks…")};
+ state.ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(_){}};
+ state.ws.onerror=()=>{feedMessage.textContent="Deriv market WebSocket error. Retrying…"};
+ state.ws.onclose=()=>{if(state.connected)setFeed(false,"Market connection closed. Tap Connect to retry.");else{connectBtn.disabled=false;setFeed(false,"Unable to connect to Deriv market data from this browser/network.")}};
 }
-
-function send(payload) {
-  if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(payload));
+function disconnect(){if(state.ws)state.ws.close();state.ws=null;setFeed(false,"Disconnected.")}
+function handle(d){
+ if(d.error){feedMessage.textContent=d.error.message||"Deriv market-data error";return}
+ if(d.msg_type==="history"&&d.history){const s=d.echo_req?.ticks_history,p=d.history.prices||[],t=d.history.times||[];if(s){state.ticks.set(s,p.map((v,i)=>({digit:lastDigit(v),quote:Number(v),epoch:t[i]})).slice(-WINDOW));updateTicks()}}
+ if(d.msg_type==="tick"&&d.tick){const s=d.tick.symbol,q=Number(d.tick.quote);if(!s||!Number.isFinite(q))return;const a=state.ticks.get(s)||[];a.push({digit:lastDigit(q),quote:q,epoch:d.tick.epoch});if(a.length>WINDOW)a.splice(0,a.length-WINDOW);state.ticks.set(s,a);updateTicks()}
 }
-
-function connect() {
-  if (state.ws) { try { state.ws.close(); } catch (_) {} }
-  const url = WS_URLS[wsAttempt % WS_URLS.length];
-  feedMessage.textContent = "Connecting to Deriv public market data…";
-  connectBtn.disabled = true;
-  state.ws = new WebSocket(url);
-  state.ws.onopen = () => {
-    wsAttempt = 0;
-    const list = SYNTHETIC_MARKETS.map(([symbol, name]) => ({underlying_symbol:symbol, underlying_symbol_name:name}));
-    state.symbols = list;
-    state.selected = new Set(list.map(s => s.underlying_symbol));
-    marketSummary.textContent = list.length + " Matches markets ready";
-    renderMarkets();
-    list.forEach((s,i) => {
-      const symbol=s.underlying_symbol; state.ticks.set(symbol,[]);
-      send({ticks_history:symbol,count:WINDOW,end:"latest",style:"ticks",req_id:1000+i});
-      send({ticks:symbol,subscribe:1,req_id:2000+i});
-    });
-    setFeedStatus(true,"Live Matches market data connected. Loading ticks…");
-  };
-  state.ws.onmessage = event => { try { handleMessage(JSON.parse(event.data)); } catch (_) {} };
-  state.ws.onerror = () => { try { state.ws.close(); } catch (_) {} };
-  state.ws.onclose = () => {
-    if (state.connected) { setFeedStatus(false,"Connection closed."); return; }
-    if (wsAttempt < WS_URLS.length-1) {
-      wsAttempt++; feedMessage.textContent="Trying the backup Deriv market connection…";
-      setTimeout(connect,400);
-    } else {
-      wsAttempt=0; setFeedStatus(false,"Unable to open Deriv market data from this browser/network.");
-      connectBtn.disabled=false;
-    }
-  };
+function lastDigit(v){const s=String(v);const x=s.includes(".")?s.split(".")[1]:"";return Number((x||s).slice(-1))}
+function updateTicks(){$("tickCount").textContent=[...state.ticks.values()].reduce((n,a)=>n+a.length,0)+" ticks"}
+function renderMarkets(){marketsEl.innerHTML=MARKETS.map(([s,n])=>'<label class="market"><input type="checkbox" data-s="'+s+'" '+(state.selected.has(s)?"checked":"")+'> '+n+'</label>').join("");marketsEl.querySelectorAll("input").forEach(x=>x.onchange=()=>{x.checked?state.selected.add(x.dataset.s):state.selected.delete(x.dataset.s);scanBtn.disabled=!state.connected||!state.selected.size})}
+function chooseResult(){
+ let best=null;
+ for(const s of state.selected){const a=state.ticks.get(s)||[];if(a.length<30)continue;const counts=Array(10).fill(0);a.forEach(x=>counts[x.digit]++);const ranked=counts.map((c,d)=>({d,c})).sort((x,y)=>y.c-x.c||x.d-y.d);const top=ranked[0],second=ranked[1],recent=a.slice(-30),recentShare=recent.filter(x=>x.digit===top.d).length/30,share=top.c/a.length,dominance=share-second.c/a.length;const strength=Math.min(95,Math.round(50+dominance*120+Math.max(0,recentShare-.1)*80));const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,evidence:+(share*100).toFixed(2),recent:+(recentShare*100).toFixed(2),sample:a.length,counts,generated:new Date()};if(!best||r.strength>best.strength)best=r}
+ return best;
 }
-function disconnect() {
-  if (state.ws) state.ws.close();
-  state.ws = null;
-  setFeedStatus(false, "Disconnected.");
+async function scan(){
+ if(state.scanning||!state.connected||!state.selected.size)return;state.scanning=true;scanBtn.disabled=true;scanProgress.classList.remove("hidden");scanState.textContent="SCANNING";scanState.className="state scanning";
+ const start=Date.now();await new Promise(res=>{const id=setInterval(()=>{const e=Math.min(SCAN_SECONDS*1000,Date.now()-start);scanSeconds.textContent=Math.max(0,Math.ceil((SCAN_SECONDS*1000-e)/1000))+"s";progressBar.style.width=Math.round(e/(SCAN_SECONDS*10))+"%";if(e>=SCAN_SECONDS*1000){clearInterval(id);res()}},250)});
+ const r=chooseResult();scanProgress.classList.add("hidden");scanState.textContent=r?"FROZEN":"NO SIGNAL";scanState.className="state";renderSignal(r);state.scanning=false;scanBtn.disabled=!state.connected||!state.selected.size;
 }
-
-function handleMessage(data) {
-  if (data.error) {
-    feedMessage.textContent = data.error.message || "Deriv returned a market-data message error.";
-    // Keep the WebSocket online if the error was only for the optional symbol-list request.
-    return;
-  }
-  if (data.msg_type === "active_symbols") {
-    const active = data.active_symbols || [];
-    const available = new Map(active.map(s => [
-      s.underlying_symbol || s.symbol,
-      s.underlying_symbol_name || s.display_name
-    ]));
-    const list = SYNTHETIC_MARKETS
-      .filter(([symbol]) => !active.length || available.has(symbol) || /^(1HZ|R_|JD)/i.test(symbol))
-      .map(([symbol, fallbackName]) => ({
-        underlying_symbol: symbol,
-        underlying_symbol_name: available.get(symbol) || fallbackName
-      }));
-    state.symbols = list;
-    state.selected = new Set(list.map(s => s.underlying_symbol));
-    marketSummary.textContent = list.length + " Matches markets ready";
-    renderMarkets();
-    list.forEach(s => {
-      const symbol = s.underlying_symbol;
-      state.ticks.set(symbol, []);
-      send({ ticks_history: symbol, count: WINDOW, end: "latest", style: "ticks", req_id: 1000 + list.indexOf(s) });
-      send({ ticks: symbol, subscribe: 1, req_id: 2000 + list.indexOf(s) });
-    });
-    setFeedStatus(true, list.length ? "Live Matches markets connected. Ticks are loading…" : "No synthetic markets available.");
-  }
-  if (data.msg_type === "history" && data.history) {
-    const symbol = data.echo_req?.ticks_history;
-    const prices = data.history.prices || [];
-    const times = data.history.times || [];
-    if (symbol && prices.length) {
-      const digits = [];
-      prices.forEach((price,i) => {
-        const quote = Number(price);
-        if (!Number.isFinite(quote)) return;
-        const text = String(price);
-        const decimals = text.includes(".") ? text.split(".")[1].length : 0;
-        digits.push({digit:Number(text.replace(/\D/g,"").slice(-1)),epoch:times[i],quote});
-      });
-      state.ticks.set(symbol,digits.slice(-WINDOW));
-      updateTickCount();
-    }
-  }
-  if (data.msg_type === "tick" && data.tick) {
-    const symbol = data.tick.symbol || data.tick.underlying_symbol;
-    const quote = Number(data.tick.quote);
-    if (!Number.isFinite(quote)) return;
-    const digits = state.ticks.get(symbol) || [];
-    const pipSize = Number.isFinite(Number(data.tick.pip_size))
-      ? Number(data.tick.pip_size)
-      : inferPipSize(quote);
-    const digit = extractLastDigit(quote, pipSize);
-    digits.push({ digit, epoch: data.tick.epoch, quote });
-    if (digits.length > WINDOW) digits.splice(0, digits.length - WINDOW);
-    state.ticks.set(symbol, digits);
-    updateTickCount();
-  }
+function renderSignal(r){
+ if(!r){$("mainDigit").textContent="—";$("mainStrength").textContent="—%";$("mainMarket").textContent="Not enough live ticks";$("tradeState").textContent="WAIT";$("tradeState").className="trade-state wait";$("frozenText").textContent="No signal was generated.";return}
+ const trade=r.strength>=TRADE_THRESHOLD;$("mainDigit").textContent=r.digit;$("mainStrength").textContent=r.strength+"%";$("mainMarket").textContent=r.name;$("statStrength").textContent=r.strength+"%";$("statEvidence").textContent=r.evidence+"%";$("statRecent").textContent=r.recent+"%";$("statSample").textContent=r.sample;$("tradeState").textContent=trade?"TRADE NOW ≥ 75%":"WAIT";$("tradeState").className="trade-state "+(trade?"trade":"wait");$("distributionMarket").textContent=r.name;$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard(r.counts)}
+function renderBoard(c){const rank=c.map((n,d)=>({d,n})).sort((a,b)=>b.n-a.n||a.d-b.d),top=rank[0].d,second=rank[1].d,low=rank[9].d,secondLow=rank[8].d;$("digitBoard").innerHTML=c.map((n,d)=>{let cl="",m="";if(d===top){cl="top";m="💚"}else if(d===second){cl="second";m="💙"}else if(d===low){cl="low";m="❤️"}else if(d===secondLow){cl="second-low";m="🧡"}return '<div class="digit-tile '+cl+'"><span class="digit-mark">'+m+'</span><div class="num">'+d+'</div><small>'+n+'×</small></div>'}).join("")}
+async function connectApi(){
+ const token=$("token").value.trim(),app=$("appId").value.trim(),acct=$("accountId").value.trim();if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return}
+ $("apiMessage").textContent="Authenticating…";apiConnectBtn.disabled=true;
+ try{const r=await fetch("https://api.derivws.com/trading/v1/options/accounts/"+encodeURIComponent(acct)+"/otp",{method:"POST",headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":app}});const d=await r.json();if(!r.ok||!d?.data?.url)throw Error(d?.error?.message||"Authentication failed");state.apiWs=new WebSocket(d.data.url);state.apiWs.onopen=()=>{ $("apiStatus").textContent="CONNECTED";$("apiStatus").className="status-badge online";$("apiStatus2").textContent="ONLINE";$("apiStatus2").className="online";$("botStatus").textContent="MONITORING";$("botStatus").className="online";$("apiMessage").textContent="Connected. Waiting for contracts opened manually in Deriv Bot.";apiDisconnectBtn.disabled=false;state.apiWs.send(JSON.stringify({portfolio:1}))};state.apiWs.onmessage=e=>apiMessage(JSON.parse(e.data));state.apiWs.onclose=()=>disconnectApi()}
+ catch(e){$("apiMessage").textContent=e.message||"API connection failed";apiConnectBtn.disabled=false}
 }
-
-function updateTickCount() { $("tickCount").textContent = [...state.ticks.values()].reduce((n,a)=>n+a.length,0) + " ticks"; }
-
-function inferPipSize(quote) {
-  const text = String(quote);
-  const decimals = text.includes(".") ? text.split(".")[1].length : 0;
-  return decimals;
-}
-
-function extractLastDigit(quote, pipSize) {
-  const fixed = Number(quote).toFixed(Math.max(0, pipSize));
-  const digits = fixed.replace(/\D/g, "");
-  return Number(digits.slice(-1));
-}
-
-function renderMarkets() {
-  if (!state.symbols.length) {
-    marketsEl.innerHTML = '<div class="empty">No Volatility/Jump markets were returned.</div>';
-    return;
-  }
-  marketsEl.innerHTML = state.symbols.map(s => {
-    const symbol = s.underlying_symbol || s.symbol;
-    const name = s.underlying_symbol_name || s.display_name || symbol;
-    const checked = state.selected.has(symbol) ? "checked" : "";
-    return '<label class="market"><input type="checkbox" data-symbol="' + escapeHtml(symbol) + '" ' + checked + '> <span>' + escapeHtml(name) + '</span></label>';
-  }).join("");
-  marketsEl.querySelectorAll("input").forEach(input => input.addEventListener("change", e => {
-    const symbol = e.target.dataset.symbol;
-    if (e.target.checked) state.selected.add(symbol); else state.selected.delete(symbol);
-    scanBtn.disabled = !state.connected || state.selected.size === 0;
-  }));
-}
-
-async function scan() {
-  if (state.scanning || !state.connected || state.selected.size === 0) return;
-  state.scanning = true;
-  scanBtn.disabled = true;
-  scanProgress.classList.remove("hidden");
-  resultsEl.innerHTML = '<div class="empty">Scanning markets…</div>';
-  const started = Date.now();
-  await new Promise(resolve => {
-    const timer = setInterval(() => {
-      const elapsed = Math.min(25000, Date.now() - started);
-      const left = Math.max(0, Math.ceil((25000 - elapsed) / 1000));
-      scanSeconds.textContent = left + "s";
-      progressBar.style.width = Math.round(elapsed / 250) + "%";
-      if (elapsed >= 25000) { clearInterval(timer); resolve(); }
-    }, 250);
-  });
-  const generated = [...state.selected].map(symbol => {
-    const sample = state.ticks.get(symbol) || [];
-    return sample.length < 30 ? {symbol, insufficient:true, count:sample.length} : buildSignal(symbol,sample);
-  });
-  state.frozen = generated;
-  scanProgress.classList.add("hidden");
-  renderResults();
-  state.scanning = false;
-  scanBtn.disabled = !state.connected || state.selected.size === 0;
-}
-function buildSignal(symbol, sample) {
-  const counts = Array(10).fill(0);
-  sample.forEach(x => counts[x.digit]++);
-  const ranked = counts.map((count,digit)=>({digit,count})).sort((a,b)=>b.count-a.count || a.digit-b.digit);
-  const candidate = ranked[0];
-  const total = sample.length;
-  const share = candidate.count / total;
-  const second = ranked[1].count / total;
-  const dominance = Math.max(0, share - second);
-  const recent = sample.slice(-30);
-  const recentCount = recent.filter(x => x.digit === candidate.digit).length;
-  const recentShare = recentCount / recent.length;
-
-  // Transparent scanner score: historical frequency + recent consistency.
-  // It is a signal-strength score, not a probability of winning the next tick.
-  const strength = Math.min(95, Math.round(50 + dominance * 120 + Math.max(0, recentShare - 0.10) * 80));
-  const action = strength >= TRADE_THRESHOLD ? "TRADE NOW" : "WAIT";
-
-  return {
-    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(),
-    symbol, digit: candidate.digit, strength, action,
-    evidence: Math.round(share * 10000) / 100,
-    recentEvidence: Math.round(recentShare * 10000) / 100,
-    distribution: counts,
-    sampleSize: total,
-    generatedAt: new Date().toISOString()
-  };
-}
-
-function renderResults() {
-  if (!state.frozen.length) {
-    resultsEl.innerHTML = '<div class="empty">No frozen signal yet.</div>';
-    return;
-  }
-  resultsEl.innerHTML = state.frozen.map(r => {
-    if (r.insufficient) return '<div class="result wait"><strong>' + escapeHtml(r.symbol) + '</strong><p>Collecting ticks: ' + r.count + '/30</p></div>';
-    const trade = r.action === "TRADE NOW";
-    const ranked = r.distribution.map((count,digit)=>({digit,count}))
-      .sort((a,b)=>b.count-a.count || a.digit-b.digit);
-    const top = ranked[0].digit, second = ranked[1].digit;
-    const low = ranked[ranked.length-1].digit, secondLow = ranked[ranked.length-2].digit;
-    const board = r.distribution.map((count,digit) => {
-      let cls = "", mark = "";
-      if (digit === top) { cls = "top"; mark = "💚"; }
-      else if (digit === second) { cls = "second"; mark = "💙"; }
-      else if (digit === low) { cls = "low"; mark = "❤️"; }
-      else if (digit === secondLow) { cls = "second-low"; mark = "🧡"; }
-      return '<div class="digit-tile ' + cls + '"><span class="digit-mark">' + mark + '</span><div class="num">' + digit + '</div><small>' + count + '×</small></div>';
-    }).join("");
-    return '<article class="result ' + (trade ? "trade" : "wait") + '">' +
-      '<div class="result-top"><div><strong>' + escapeHtml(r.symbol) + '</strong><div class="digit">MATCH ' + r.digit + '</div></div>' +
-      '<div class="' + (trade ? "trade-label" : "wait-label") + '">' + r.action + '</div></div>' +
-      '<div class="distribution-title"><strong>Digit distribution</strong><span class="note">' + r.sampleSize + ' ticks</span></div>' +
-      '<div class="digit-board">' + board + '</div>' +
-      '<div class="legend"><span>💚 Most</span><span>💙 2nd highest</span><span>❤️ Least</span><span>🧡 2nd least</span></div>' +
-      '<div class="metrics"><div class="metric"><small>Strength</small><strong>' + r.strength + '%</strong></div>' +
-      '<div class="metric"><small>Evidence</small><strong>' + r.evidence + '%</strong></div>' +
-      '<div class="metric"><small>Recent</small><strong>' + r.recentEvidence + '%</strong></div></div>' +
-      '<p class="note">Frozen ' + new Date(r.generatedAt).toLocaleTimeString() + '</p>' +
-      '</article>';
-  }).join("");
-};
-
-function initScanner() {
-  toggleMarketsBtn.addEventListener("click", () => {
-    const hidden = marketsWrap.classList.toggle("hidden");
-    toggleMarketsBtn.textContent = hidden ? "Show markets" : "Hide markets";
-  });
-  clearAllBtn.addEventListener("click", () => {
-    state.selected.clear(); renderMarkets();
-    scanBtn.disabled = !state.connected || state.selected.size === 0;
-  });
-  apiConnectBtn.addEventListener("click", connectApi);
-  apiDisconnectBtn.addEventListener("click", () => disconnectApi());
-  connectBtn.addEventListener("click", connect);
-  disconnectBtn.addEventListener("click", disconnect);
-  scanBtn.addEventListener("click", scan);
-}
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initScanner, {once:true});
-else initScanner();
+function apiMessage(d){if(d.error){$("apiMessage").textContent=d.error.message;return}if(d.msg_type==="portfolio")(d.portfolio?.contracts||[]).forEach(c=>{const id=String(c.contract_id||"");if(id&&!state.contracts.has(id)){state.contracts.add(id);state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1}))}});if(d.msg_type==="proposal_open_contract")$("botStatus").textContent="MONITORING • "+(d.proposal_open_contract.status||"OPEN")}
+function disconnectApi(){$("apiStatus").textContent="NOT CONNECTED";$("apiStatus").className="status-badge";$("apiStatus2").textContent="OFFLINE";$("apiStatus2").className="";$("botStatus").textContent="OFFLINE";$("botStatus").className="";apiConnectBtn.disabled=false;apiDisconnectBtn.disabled=true;if(state.apiWs)try{state.apiWs.close()}catch(e){}state.apiWs=null}
+function init(){renderMarkets();toggleMarketsBtn.onclick=()=>{marketsWrap.classList.toggle("hidden");toggleMarketsBtn.textContent=marketsWrap.classList.contains("hidden")?"Show markets":"Hide markets"};selectAllBtn.onclick=()=>{state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();scanBtn.disabled=!state.connected};clearAllBtn.onclick=()=>{state.selected.clear();renderMarkets();scanBtn.disabled=true};connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;setTimeout(connect,500)}
+document.readyState==="loading"?document.addEventListener("DOMContentLoaded",init):init();
