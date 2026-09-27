@@ -1,4 +1,5 @@
-const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
+const WS_URL = "wss://ws.binaryws.com/websockets/v3";
+const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
 const TRADE_THRESHOLD = 75;
 const WINDOW = 120;
 
@@ -8,7 +9,11 @@ const state = {
   symbols: [],
   selected: new Set(),
   ticks: new Map(),
-  frozen: []
+  frozen: [],
+  scanning: false,
+  apiWs: null,
+  apiPoll: null,
+  monitoredContracts: new Set()
 };
 
 const $ = id => document.getElementById(id);
@@ -26,6 +31,8 @@ const clearAllBtn = $("clearAllBtn");
 
 function setFeedStatus(online, message) {
   state.connected = online;
+  marketStatus.textContent = online ? "Connected" : "Disconnected";
+  marketStatus.className = online ? "online" : "";
   feedBadge.textContent = online ? "Feed online" : "Feed offline";
   feedBadge.className = "badge " + (online ? "online" : "offline");
   feedMessage.textContent = message;
@@ -44,7 +51,7 @@ function connect() {
   feedMessage.textContent = "Connecting to Deriv public market data…";
   state.ws.onopen = () => {
     setFeedStatus(true, "Connected. Loading available synthetic markets…");
-    send({ active_symbols: "brief", req_id: 1 });
+    send({ active_symbols: "brief", product_type: "basic", req_id: 1 });
   };
   state.ws.onmessage = event => handleMessage(JSON.parse(event.data));
   state.ws.onerror = () => setFeedStatus(false, "WebSocket error. Check the browser/network connection and try again.");
@@ -78,8 +85,9 @@ function handleMessage(data) {
     marketSummary.textContent = list.length + " synthetic markets available";
     renderMarkets();
     list.forEach(s => {
-      state.ticks.set(s.underlying_symbol, []);
-      send({ ticks: s.underlying_symbol, subscribe: 1 });
+      const symbol = s.underlying_symbol || s.symbol;
+      state.ticks.set(symbol, []);
+      send({ ticks: symbol, subscribe: 1 });
     });
     setFeedStatus(true, list.length ? "Live market feed connected." : "Connected, but no matching synthetic markets were returned.");
   }
@@ -117,7 +125,7 @@ function renderMarkets() {
     return;
   }
   marketsEl.innerHTML = state.symbols.map(s => {
-    const symbol = s.underlying_symbol;
+    const symbol = s.underlying_symbol || s.symbol;
     const name = s.underlying_symbol_name || symbol;
     const checked = state.selected.has(symbol) ? "checked" : "";
     return '<label class="market"><input type="checkbox" data-symbol="' + escapeHtml(symbol) + '" ' + checked + '> <span>' + escapeHtml(name) + '</span></label>';
@@ -129,18 +137,32 @@ function renderMarkets() {
   }));
 }
 
-function scan() {
-  const selected = [...state.selected];
-  const generated = selected.map(symbol => {
+async function scan() {
+  if (state.scanning || !state.connected || state.selected.size === 0) return;
+  state.scanning = true;
+  scanBtn.disabled = true;
+  scanProgress.classList.remove("hidden");
+  resultsEl.innerHTML = '<div class="empty">Scanning markets…</div>';
+  const started = Date.now();
+  await new Promise(resolve => {
+    const timer = setInterval(() => {
+      const elapsed = Math.min(25000, Date.now() - started);
+      const left = Math.max(0, Math.ceil((25000 - elapsed) / 1000));
+      scanSeconds.textContent = left + "s";
+      progressBar.style.width = Math.round(elapsed / 250) + "%";
+      if (elapsed >= 25000) { clearInterval(timer); resolve(); }
+    }, 250);
+  });
+  const generated = [...state.selected].map(symbol => {
     const sample = state.ticks.get(symbol) || [];
-    if (sample.length < 30) return { symbol, insufficient: true, count: sample.length };
-    return buildSignal(symbol, sample);
-  }).filter(Boolean);
-
+    return sample.length < 30 ? {symbol, insufficient:true, count:sample.length} : buildSignal(symbol,sample);
+  });
   state.frozen = generated;
+  scanProgress.classList.add("hidden");
   renderResults();
+  state.scanning = false;
+  scanBtn.disabled = !state.connected || state.selected.size === 0;
 }
-
 function buildSignal(symbol, sample) {
   const counts = Array(10).fill(0);
   sample.forEach(x => counts[x.digit]++);
@@ -213,3 +235,44 @@ clearAllBtn.addEventListener("click", () => {
   renderMarkets();
   scanBtn.disabled = !state.connected || state.selected.size === 0;
 });
+
+async function connectApi() {
+  const token = $("token").value.trim(), appId = $("appId").value.trim(), accountId = $("accountId").value.trim();
+  if (!token || !appId || !accountId) { apiStatus.textContent = "Enter token, App ID and Account ID"; return; }
+  apiConnectBtn.disabled = true;
+  apiStatus.textContent = "Authenticating…";
+  try {
+    const res = await fetch(OTP_URL + "/" + encodeURIComponent(accountId) + "/otp", {method:"POST",headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":appId}});
+    const data = await res.json();
+    if (!res.ok || !data?.data?.url) throw new Error(data?.error?.message || "Authentication failed");
+    state.apiWs = new WebSocket(data.data.url);
+    state.apiWs.onopen = () => {
+      apiStatus.textContent = "Connected"; apiStatus.className="online";
+      botStatus.textContent = "Connected — monitoring"; botStatus.className="online";
+      apiDisconnectBtn.disabled=false;
+      state.apiWs.send(JSON.stringify({portfolio:1,req_id:101}));
+      state.apiPoll=setInterval(()=>{if(state.apiWs?.readyState===WebSocket.OPEN)state.apiWs.send(JSON.stringify({portfolio:1,req_id:Date.now()%1000000}));},4000);
+    };
+    state.apiWs.onmessage=e=>handleApiMessage(JSON.parse(e.data));
+    state.apiWs.onerror=()=>{apiStatus.textContent="Connection error";apiStatus.className="";};
+    state.apiWs.onclose=()=>disconnectApi(false);
+  } catch(e) { apiStatus.textContent=e.message||"Authentication failed"; apiStatus.className=""; apiConnectBtn.disabled=false; }
+}
+function handleApiMessage(data) {
+  if(data.error){apiStatus.textContent=data.error.message||"API error";apiStatus.className="";return;}
+  if(data.msg_type==="portfolio") (data.portfolio?.contracts||[]).forEach(c=>{
+    const id=String(c.contract_id||""); if(!id||state.monitoredContracts.has(id))return;
+    state.monitoredContracts.add(id);
+    state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1,req_id:Date.now()%1000000}));
+  });
+  if(data.msg_type==="proposal_open_contract" && data.proposal_open_contract?.status) botStatus.textContent="Connected — contract "+data.proposal_open_contract.status;
+}
+function disconnectApi(update=true) {
+  if(state.apiPoll)clearInterval(state.apiPoll); state.apiPoll=null;
+  if(state.apiWs && state.apiWs.readyState!==WebSocket.CLOSED)state.apiWs.close(); state.apiWs=null;
+  apiStatus.textContent="Not connected"; apiStatus.className="";
+  botStatus.textContent="Not connected"; botStatus.className="";
+  apiConnectBtn.disabled=false; apiDisconnectBtn.disabled=true;
+}
+apiConnectBtn.addEventListener("click",connectApi);
+apiDisconnectBtn.addEventListener("click",()=>disconnectApi());
