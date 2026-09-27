@@ -2,6 +2,13 @@ const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
 const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
 const TRADE_THRESHOLD = 75;
 const WINDOW = 120;
+const SYNTHETIC_MARKETS = [
+  ["1HZ10V","Volatility 10 (1s)"],["1HZ15V","Volatility 15 (1s)"],["1HZ25V","Volatility 25 (1s)"],
+  ["1HZ30V","Volatility 30 (1s)"],["1HZ50V","Volatility 50 (1s)"],["1HZ75V","Volatility 75 (1s)"],
+  ["1HZ90V","Volatility 90 (1s)"],["1HZ100V","Volatility 100 (1s)"],
+  ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
+  ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]
+];
 
 const state = {
   ws: null,
@@ -80,27 +87,48 @@ function handleMessage(data) {
     return;
   }
   if (data.msg_type === "active_symbols") {
-    const list = (data.active_symbols || [])
-      .filter(s => {
-        const name = String(s.underlying_symbol_name || s.display_name || "").toLowerCase();
-        const symbol = String(s.underlying_symbol || s.symbol || "").toLowerCase();
-        return /volatility|jump/.test(name) ||
-          /^(r_10|r_25|r_50|r_75|r_100|1hz\d+v|jd\d+)/i.test(symbol);
-      })
-      .sort((a,b) => String(a.underlying_symbol_name || a.display_name || a.underlying_symbol || "")
-        .localeCompare(String(b.underlying_symbol_name || b.display_name || b.underlying_symbol || "")));
+    const active = data.active_symbols || [];
+    const available = new Map(active.map(s => [
+      s.underlying_symbol || s.symbol,
+      s.underlying_symbol_name || s.display_name
+    ]));
+    const list = SYNTHETIC_MARKETS
+      .filter(([symbol]) => !active.length || available.has(symbol) || /^(1HZ|R_|JD)/i.test(symbol))
+      .map(([symbol, fallbackName]) => ({
+        underlying_symbol: symbol,
+        underlying_symbol_name: available.get(symbol) || fallbackName
+      }));
     state.symbols = list;
-    marketSummary.textContent = list.length + " synthetic markets available";
+    state.selected = new Set(list.map(s => s.underlying_symbol));
+    marketSummary.textContent = list.length + " Matches markets ready";
     renderMarkets();
     list.forEach(s => {
-      const symbol = s.underlying_symbol || s.symbol;
+      const symbol = s.underlying_symbol;
       state.ticks.set(symbol, []);
-      send({ ticks: symbol, subscribe: 1 });
+      send({ ticks_history: symbol, count: WINDOW, end: "latest", style: "ticks", req_id: 1000 + list.indexOf(s) });
+      send({ ticks: symbol, subscribe: 1, req_id: 2000 + list.indexOf(s) });
     });
-    setFeedStatus(true, list.length ? "Live market feed connected." : "Connected, but no matching synthetic markets were returned.");
+    setFeedStatus(true, list.length ? "Live Matches markets connected. Ticks are loading…" : "No synthetic markets available.");
+  }
+  if (data.msg_type === "history" && data.history) {
+    const symbol = data.echo_req?.ticks_history;
+    const prices = data.history.prices || [];
+    const times = data.history.times || [];
+    if (symbol && prices.length) {
+      const digits = [];
+      prices.forEach((price,i) => {
+        const quote = Number(price);
+        if (!Number.isFinite(quote)) return;
+        const text = String(price);
+        const decimals = text.includes(".") ? text.split(".")[1].length : 0;
+        digits.push({digit:Number(text.replace(/\\D/g,"").slice(-1)),epoch:times[i],quote});
+      });
+      state.ticks.set(symbol,digits.slice(-WINDOW));
+      updateTickCount();
+    }
   }
   if (data.msg_type === "tick" && data.tick) {
-    const symbol = data.tick.symbol;
+    const symbol = data.tick.symbol || data.tick.underlying_symbol;
     const quote = Number(data.tick.quote);
     if (!Number.isFinite(quote)) return;
     const digits = state.ticks.get(symbol) || [];
@@ -111,9 +139,11 @@ function handleMessage(data) {
     digits.push({ digit, epoch: data.tick.epoch, quote });
     if (digits.length > WINDOW) digits.splice(0, digits.length - WINDOW);
     state.ticks.set(symbol, digits);
-    $("tickCount").textContent = [...state.ticks.values()].reduce((n,a)=>n+a.length,0) + " ticks";
+    updateTickCount();
   }
 }
+
+function updateTickCount() { $("tickCount").textContent = [...state.ticks.values()].reduce((n,a)=>n+a.length,0) + " ticks"; }
 
 function inferPipSize(quote) {
   const text = String(quote);
