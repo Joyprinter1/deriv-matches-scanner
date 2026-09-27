@@ -19,6 +19,10 @@ const resultsEl = $("results");
 const connectBtn = $("connectBtn");
 const disconnectBtn = $("disconnectBtn");
 const scanBtn = $("scanBtn");
+const toggleMarketsBtn = $("toggleMarketsBtn");
+const marketsWrap = $("marketsWrap");
+const marketSummary = $("marketSummary");
+const clearAllBtn = $("clearAllBtn");
 
 function setFeedStatus(online, message) {
   state.connected = online;
@@ -71,6 +75,7 @@ function handleMessage(data) {
       .sort((a,b) => String(a.underlying_symbol_name || a.display_name || a.underlying_symbol || "")
         .localeCompare(String(b.underlying_symbol_name || b.display_name || b.underlying_symbol || "")));
     state.symbols = list;
+    marketSummary.textContent = list.length + " synthetic markets available";
     renderMarkets();
     list.forEach(s => {
       state.ticks.set(s.underlying_symbol, []);
@@ -159,6 +164,7 @@ function buildSignal(symbol, sample) {
     symbol, digit: candidate.digit, strength, action,
     evidence: Math.round(share * 10000) / 100,
     recentEvidence: Math.round(recentShare * 10000) / 100,
+    distribution: counts,
     sampleSize: total,
     generatedAt: new Date().toISOString()
   };
@@ -166,32 +172,44 @@ function buildSignal(symbol, sample) {
 
 function renderResults() {
   if (!state.frozen.length) {
-    resultsEl.innerHTML = '<div class="empty">No signal generated.</div>';
+    resultsEl.innerHTML = '<div class="empty">No frozen signal yet.</div>';
     return;
   }
   resultsEl.innerHTML = state.frozen.map(r => {
     if (r.insufficient) return '<div class="result wait"><strong>' + escapeHtml(r.symbol) + '</strong><p>Collecting ticks: ' + r.count + '/30</p></div>';
     const trade = r.action === "TRADE NOW";
+    const ranked = r.distribution.map((count,digit)=>({digit,count}))
+      .sort((a,b)=>b.count-a.count || a.digit-b.digit);
+    const top = ranked[0].digit, second = ranked[1].digit;
+    const low = ranked[ranked.length-1].digit, secondLow = ranked[ranked.length-2].digit;
+    const board = r.distribution.map((count,digit) => {
+      let cls = "", mark = "";
+      if (digit === top) { cls = "top"; mark = "💚"; }
+      else if (digit === second) { cls = "second"; mark = "💙"; }
+      else if (digit === low) { cls = "low"; mark = "❤️"; }
+      else if (digit === secondLow) { cls = "second-low"; mark = "🧡"; }
+      return '<div class="digit-tile ' + cls + '"><span class="digit-mark">' + mark + '</span><div class="num">' + digit + '</div><small>' + count + '×</small></div>';
+    }).join("");
     return '<article class="result ' + (trade ? "trade" : "wait") + '">' +
       '<div class="result-top"><div><strong>' + escapeHtml(r.symbol) + '</strong><div class="digit">MATCH ' + r.digit + '</div></div>' +
       '<div class="' + (trade ? "trade-label" : "wait-label") + '">' + r.action + '</div></div>' +
+      '<div class="distribution-title"><strong>Digit distribution</strong><span class="note">' + r.sampleSize + ' ticks</span></div>' +
+      '<div class="digit-board">' + board + '</div>' +
+      '<div class="legend"><span>💚 Most</span><span>💙 2nd highest</span><span>❤️ Least</span><span>🧡 2nd least</span></div>' +
       '<div class="metrics"><div class="metric"><small>Strength</small><strong>' + r.strength + '%</strong></div>' +
       '<div class="metric"><small>Evidence</small><strong>' + r.evidence + '%</strong></div>' +
       '<div class="metric"><small>Recent</small><strong>' + r.recentEvidence + '%</strong></div></div>' +
-      '<p class="note">Frozen ' + new Date(r.generatedAt).toLocaleTimeString() + ' • ' + r.sampleSize + ' ticks</p>' +
+      '<p class="note">Frozen ' + new Date(r.generatedAt).toLocaleTimeString() + '</p>' +
       '</article>';
   }).join("");
-}
+};
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-}
-
-connectBtn.addEventListener("click", connect);
-disconnectBtn.addEventListener("click", disconnect);
-scanBtn.addEventListener("click", scan);
-$("selectAllBtn").addEventListener("click", () => {
-  state.symbols.forEach(s => state.selected.add(s.underlying_symbol));
+toggleMarketsBtn.addEventListener("click", () => {
+  const hidden = marketsWrap.classList.toggle("hidden");
+  toggleMarketsBtn.textContent = hidden ? "Show markets" : "Hide markets";
+});
+clearAllBtn.addEventListener("click", () => {
+  state.selected.clear();
   renderMarkets();
   scanBtn.disabled = !state.connected || state.selected.size === 0;
 });
