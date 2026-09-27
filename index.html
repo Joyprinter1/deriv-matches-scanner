@@ -29,13 +29,22 @@
       <p id="feedMessage" class="status">Not connected. Public market data does not require your API token.</p>
     </section>
 
-    <section class="panel">
+    <section class="panel market-panel">
       <div class="section-title">
-        <h2>Markets</h2>
-        <button id="selectAllBtn" class="link-btn">Select all</button>
+        <div>
+          <h2>Markets</h2>
+          <span id="marketSummary" class="market-summary">Hidden until opened</span>
+        </div>
+        <button id="toggleMarketsBtn" class="link-btn">Show markets</button>
       </div>
-      <div id="markets" class="market-grid">
-        <div class="empty">Connect to load available synthetic markets.</div>
+      <div id="marketsWrap" class="markets-wrap hidden">
+        <div class="market-actions">
+          <button id="selectAllBtn" class="link-btn">Select all</button>
+          <button id="clearAllBtn" class="link-btn">Clear</button>
+        </div>
+        <div id="markets" class="market-grid">
+          <div class="empty">Connect to load available synthetic markets.</div>
+        </div>
       </div>
     </section>
 
