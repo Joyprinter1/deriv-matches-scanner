@@ -1,4 +1,4 @@
-const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
+const WS_URL = "wss://ws.binaryws.com/websockets/v3";
 const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
 const TRADE_THRESHOLD = 75;
 const WINDOW = 120;
@@ -65,8 +65,23 @@ function connect() {
   state.ws = new WebSocket(WS_URL);
   feedMessage.textContent = "Connecting to Deriv public market data…";
   state.ws.onopen = () => {
-    setFeedStatus(true, "Connected. Loading available synthetic markets…");
-    send({ active_symbols: "brief", req_id: 1 });
+    // Start the known synthetic feeds immediately. The market list is optional;
+    // a failure to return active_symbols must not prevent ticks from streaming.
+    const list = SYNTHETIC_MARKETS.map(([symbol, name]) => ({
+      underlying_symbol: symbol,
+      underlying_symbol_name: name
+    }));
+    state.symbols = list;
+    state.selected = new Set(list.map(s => s.underlying_symbol));
+    marketSummary.textContent = list.length + " Matches markets ready";
+    renderMarkets();
+    list.forEach((s, i) => {
+      const symbol = s.underlying_symbol;
+      state.ticks.set(symbol, []);
+      send({ ticks_history: symbol, count: WINDOW, end: "latest", style: "ticks", req_id: 1000 + i });
+      send({ ticks: symbol, subscribe: 1, req_id: 2000 + i });
+    });
+    setFeedStatus(true, "Live Matches market data connected. Loading ticks…");
   };
   state.ws.onmessage = event => handleMessage(JSON.parse(event.data));
   state.ws.onerror = () => setFeedStatus(false, "WebSocket error. Check the browser/network connection and try again.");
@@ -83,7 +98,8 @@ function disconnect() {
 
 function handleMessage(data) {
   if (data.error) {
-    setFeedStatus(false, data.error.message || "Deriv returned an error.");
+    feedMessage.textContent = data.error.message || "Deriv returned a market-data message error.";
+    // Keep the WebSocket online if the error was only for the optional symbol-list request.
     return;
   }
   if (data.msg_type === "active_symbols") {
