@@ -1,4 +1,5 @@
-const WS_URL = "wss://ws.binaryws.com/websockets/v3";
+const WS_URLS = ["wss://api.derivws.com/trading/v1/options/ws/public","wss://ws.binaryws.com/websockets/v3"];
+let wsAttempt = 0;
 const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
 const TRADE_THRESHOLD = 75;
 const WINDOW = 120;
@@ -61,35 +62,38 @@ function send(payload) {
 }
 
 function connect() {
-  if (state.ws) state.ws.close();
-  state.ws = new WebSocket(WS_URL);
+  if (state.ws) { try { state.ws.close(); } catch (_) {} }
+  const url = WS_URLS[wsAttempt % WS_URLS.length];
   feedMessage.textContent = "Connecting to Deriv public market data…";
+  connectBtn.disabled = true;
+  state.ws = new WebSocket(url);
   state.ws.onopen = () => {
-    // Start the known synthetic feeds immediately. The market list is optional;
-    // a failure to return active_symbols must not prevent ticks from streaming.
-    const list = SYNTHETIC_MARKETS.map(([symbol, name]) => ({
-      underlying_symbol: symbol,
-      underlying_symbol_name: name
-    }));
+    wsAttempt = 0;
+    const list = SYNTHETIC_MARKETS.map(([symbol, name]) => ({underlying_symbol:symbol, underlying_symbol_name:name}));
     state.symbols = list;
     state.selected = new Set(list.map(s => s.underlying_symbol));
     marketSummary.textContent = list.length + " Matches markets ready";
     renderMarkets();
-    list.forEach((s, i) => {
-      const symbol = s.underlying_symbol;
-      state.ticks.set(symbol, []);
-      send({ ticks_history: symbol, count: WINDOW, end: "latest", style: "ticks", req_id: 1000 + i });
-      send({ ticks: symbol, subscribe: 1, req_id: 2000 + i });
+    list.forEach((s,i) => {
+      const symbol=s.underlying_symbol; state.ticks.set(symbol,[]);
+      send({ticks_history:symbol,count:WINDOW,end:"latest",style:"ticks",req_id:1000+i});
+      send({ticks:symbol,subscribe:1,req_id:2000+i});
     });
-    setFeedStatus(true, "Live Matches market data connected. Loading ticks…");
+    setFeedStatus(true,"Live Matches market data connected. Loading ticks…");
   };
-  state.ws.onmessage = event => handleMessage(JSON.parse(event.data));
-  state.ws.onerror = () => setFeedStatus(false, "WebSocket error. Check the browser/network connection and try again.");
+  state.ws.onmessage = event => { try { handleMessage(JSON.parse(event.data)); } catch (_) {} };
+  state.ws.onerror = () => { try { state.ws.close(); } catch (_) {} };
   state.ws.onclose = () => {
-    if (state.connected) setFeedStatus(false, "Market feed disconnected.");
+    if (state.connected) { setFeedStatus(false,"Connection closed."); return; }
+    if (wsAttempt < WS_URLS.length-1) {
+      wsAttempt++; feedMessage.textContent="Trying the backup Deriv market connection…";
+      setTimeout(connect,400);
+    } else {
+      wsAttempt=0; setFeedStatus(false,"Unable to open Deriv market data from this browser/network.");
+      connectBtn.disabled=false;
+    }
   };
 }
-
 function disconnect() {
   if (state.ws) state.ws.close();
   state.ws = null;
@@ -280,57 +284,20 @@ function renderResults() {
   }).join("");
 };
 
-toggleMarketsBtn.addEventListener("click", () => {
-  const hidden = marketsWrap.classList.toggle("hidden");
-  toggleMarketsBtn.textContent = hidden ? "Show markets" : "Hide markets";
-});
-clearAllBtn.addEventListener("click", () => {
-  state.selected.clear();
-  renderMarkets();
-  scanBtn.disabled = !state.connected || state.selected.size === 0;
-});
-
-async function connectApi() {
-  const token = $("token").value.trim(), appId = $("appId").value.trim(), accountId = $("accountId").value.trim();
-  if (!token || !appId || !accountId) { apiStatus.textContent = "Enter token, App ID and Account ID"; return; }
-  apiConnectBtn.disabled = true;
-  apiStatus.textContent = "Authenticating…";
-  try {
-    const res = await fetch(OTP_URL + "/" + encodeURIComponent(accountId) + "/otp", {method:"POST",headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":appId}});
-    const data = await res.json();
-    if (!res.ok || !data?.data?.url) throw new Error(data?.error?.message || "Authentication failed");
-    state.apiWs = new WebSocket(data.data.url);
-    state.apiWs.onopen = () => {
-      apiStatus.textContent = "Connected"; apiStatus.className="online";
-      botStatus.textContent = "Connected — monitoring"; botStatus.className="online";
-      apiDisconnectBtn.disabled=false;
-      state.apiWs.send(JSON.stringify({portfolio:1,req_id:101}));
-      state.apiPoll=setInterval(()=>{if(state.apiWs?.readyState===WebSocket.OPEN)state.apiWs.send(JSON.stringify({portfolio:1,req_id:Date.now()%1000000}));},4000);
-    };
-    state.apiWs.onmessage=e=>handleApiMessage(JSON.parse(e.data));
-    state.apiWs.onerror=()=>{apiStatus.textContent="Connection error";apiStatus.className="";};
-    state.apiWs.onclose=()=>disconnectApi(false);
-  } catch(e) { apiStatus.textContent=e.message||"Authentication failed"; apiStatus.className=""; apiConnectBtn.disabled=false; }
-}
-function handleApiMessage(data) {
-  if(data.error){apiStatus.textContent=data.error.message||"API error";apiStatus.className="";return;}
-  if(data.msg_type==="portfolio") (data.portfolio?.contracts||[]).forEach(c=>{
-    const id=String(c.contract_id||""); if(!id||state.monitoredContracts.has(id))return;
-    state.monitoredContracts.add(id);
-    state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1,req_id:Date.now()%1000000}));
+function initScanner() {
+  toggleMarketsBtn.addEventListener("click", () => {
+    const hidden = marketsWrap.classList.toggle("hidden");
+    toggleMarketsBtn.textContent = hidden ? "Show markets" : "Hide markets";
   });
-  if(data.msg_type==="proposal_open_contract" && data.proposal_open_contract?.status) botStatus.textContent="Connected — contract "+data.proposal_open_contract.status;
+  clearAllBtn.addEventListener("click", () => {
+    state.selected.clear(); renderMarkets();
+    scanBtn.disabled = !state.connected || state.selected.size === 0;
+  });
+  apiConnectBtn.addEventListener("click", connectApi);
+  apiDisconnectBtn.addEventListener("click", () => disconnectApi());
+  connectBtn.addEventListener("click", connect);
+  disconnectBtn.addEventListener("click", disconnect);
+  scanBtn.addEventListener("click", scan);
 }
-function disconnectApi(update=true) {
-  if(state.apiPoll)clearInterval(state.apiPoll); state.apiPoll=null;
-  if(state.apiWs && state.apiWs.readyState!==WebSocket.CLOSED)state.apiWs.close(); state.apiWs=null;
-  apiStatus.textContent="Not connected"; apiStatus.className="";
-  botStatus.textContent="Not connected"; botStatus.className="";
-  apiConnectBtn.disabled=false; apiDisconnectBtn.disabled=true;
-}
-apiConnectBtn.addEventListener("click",connectApi);
-apiDisconnectBtn.addEventListener("click",()=>disconnectApi());
-
-connectBtn.addEventListener("click", connect);
-disconnectBtn.addEventListener("click", disconnect);
-scanBtn.addEventListener("click", scan);
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initScanner, {once:true});
+else initScanner();
