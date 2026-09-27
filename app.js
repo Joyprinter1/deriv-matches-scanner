@@ -1,4 +1,4 @@
-const WS_URL = "wss://ws.binaryws.com/websockets/v3";
+const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
 const OTP_URL = "https://api.derivws.com/trading/v1/options/accounts";
 const TRADE_THRESHOLD = 75;
 const WINDOW = 120;
@@ -59,7 +59,7 @@ function connect() {
   feedMessage.textContent = "Connecting to Deriv public market data…";
   state.ws.onopen = () => {
     setFeedStatus(true, "Connected. Loading available synthetic markets…");
-    send({ active_symbols: "brief", product_type: "basic", req_id: 1 });
+    send({ active_symbols: "brief", req_id: 1 });
   };
   state.ws.onmessage = event => handleMessage(JSON.parse(event.data));
   state.ws.onerror = () => setFeedStatus(false, "WebSocket error. Check the browser/network connection and try again.");
@@ -100,7 +100,7 @@ function handleMessage(data) {
     setFeedStatus(true, list.length ? "Live market feed connected." : "Connected, but no matching synthetic markets were returned.");
   }
   if (data.msg_type === "tick" && data.tick) {
-    const symbol = data.tick.underlying_symbol || data.tick.symbol;
+    const symbol = data.tick.symbol;
     const quote = Number(data.tick.quote);
     if (!Number.isFinite(quote)) return;
     const digits = state.ticks.get(symbol) || [];
@@ -134,7 +134,7 @@ function renderMarkets() {
   }
   marketsEl.innerHTML = state.symbols.map(s => {
     const symbol = s.underlying_symbol || s.symbol;
-    const name = s.underlying_symbol_name || symbol;
+    const name = s.underlying_symbol_name || s.display_name || symbol;
     const checked = state.selected.has(symbol) ? "checked" : "";
     return '<label class="market"><input type="checkbox" data-symbol="' + escapeHtml(symbol) + '" ' + checked + '> <span>' + escapeHtml(name) + '</span></label>';
   }).join("");
