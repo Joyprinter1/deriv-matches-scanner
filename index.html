@@ -1,96 +1,15 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Matches Scanner</title>
-  <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Matches AI • Live</title><link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <main class="app">
-    <header class="hero">
-      <div>
-        <div class="eyebrow">DERIV • SEPARATE PROJECT</div>
-        <h1>Matches Scanner</h1>
-        <p class="muted">Matches-only market scanner with frozen signals.</p>
-      </div>
-      <span id="feedBadge" class="badge offline">Feed offline</span>
-    </header>
-
-    <section class="panel">
-      <div class="section-title">
-        <h2>Market feed</h2>
-        <span id="tickCount">0 ticks</span>
-      </div>
-      <div class="row">
-        <button id="connectBtn" class="primary">Connect market data</button>
-        <button id="disconnectBtn" class="secondary" disabled>Disconnect</button>
-      </div>
-      <p id="feedMessage" class="status">Not connected. Public market data does not require your API token.</p>
-    </section>
-
-    <section class="panel market-panel">
-      <div class="section-title">
-        <div>
-          <h2>Markets</h2>
-          <span id="marketSummary" class="market-summary">Hidden until opened</span>
-        </div>
-        <button id="toggleMarketsBtn" class="link-btn">Show markets</button>
-      </div>
-      <div id="marketsWrap" class="markets-wrap hidden">
-        <div class="market-actions">
-          <button id="selectAllBtn" class="link-btn">Select all</button>
-          <button id="clearAllBtn" class="link-btn">Clear</button>
-        </div>
-        <div id="markets" class="market-grid">
-          <div class="empty">Connect to load available synthetic markets.</div>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel scanner">
-      <div class="section-title">
-        <h2>Matches scan</h2>
-        <span class="threshold">TRADE NOW ≥ 75%</span>
-      </div>
-      <button id="scanBtn" class="primary wide" disabled>Scan all Matches markets</button>
-      <div id="scanProgress" class="scan-progress hidden">
-        <div class="scan-progress-top"><strong id="scanStatus">Scanning markets…</strong><span id="scanSeconds">25s</span></div>
-        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-        <p class="note">Collecting live ticks before producing a frozen signal.</p>
-      </div>
-      <div id="results" class="results">
-        <div class="empty">No frozen signal yet.</div>
-      </div>
-      <p class="note"><strong>Important:</strong> Signal strength is a scanner score, not a guaranteed next-tick win probability. A signal is frozen when generated so it cannot change while you switch to Deriv Bot.</p>
-    </section>
-
-    <section class="panel auth">
-      <div class="connection-statuses">
-        <div><span>Market data</span><strong id="marketStatus">Disconnected</strong></div>
-        <div><span>Deriv API</span><strong id="apiStatus">Not connected</strong></div>
-        <div><span>Deriv Bot monitor</span><strong id="botStatus">Not connected</strong></div>
-      </div>
-      <div class="section-title">
-        <h2>Account connection</h2>
-        <span class="planned">Stage 2</span>
-      </div>
-      <div class="fields">
-        <label>Deriv API token
-          <input id="token" type="password" autocomplete="off" placeholder="Enter locally — never stored in GitHub">
-        </label>
-        <label>App ID
-          <input id="appId" inputmode="numeric" placeholder="App ID">
-        </label>
-        <label>Account ID
-          <input id="accountId" autocomplete="off" placeholder="Account ID">
-        </label>
-        <button id="apiConnectBtn" class="primary wide">Connect Deriv API</button>
-        <button id="apiDisconnectBtn" class="secondary wide" disabled>Disconnect API</button>
-      </div>
-      <p class="status">API authentication uses your token, App ID and account ID locally. The scanner does not place trades. After authentication, the Bot monitor watches the account for contracts opened manually in Deriv Bot. Your token is not committed to this repository.</p>
-    </section>
-  </main>
-  <script src="app.js"></script>
-</body>
-</html>
+<body><main class="app">
+<header class="topbar"><div><div class="brand">⚡ MATCHES AI</div><h1>Last Digit Analysis</h1><p>Matches-only scanner • frozen signals • manual Deriv Bot execution</p></div><span id="feedBadge" class="live-pill offline">OFFLINE</span></header>
+<section class="panel live-feed"><div class="panel-head"><span>● LIVE MARKET DATA</span><strong id="tickCount">0 ticks</strong></div><div class="feed-row"><div><span class="small">Connection</span><strong id="marketStatus">Disconnected</strong></div><div><span class="small">Markets</span><strong id="marketSummary">0 ready</strong></div><button id="connectBtn" class="btn primary">Connect</button><button id="disconnectBtn" class="btn dark" disabled>Stop</button></div><div id="feedMessage" class="feed-message">Waiting for live market data…</div></section>
+<section class="panel selector"><div class="panel-head"><span>⚡ SELECT DERIV VOLATILITY</span><button id="toggleMarketsBtn" class="ghost">Show markets</button></div><div id="marketsWrap" class="hidden"><div class="market-actions"><button id="selectAllBtn" class="ghost">Select all</button><button id="clearAllBtn" class="ghost">Clear</button></div><div id="markets" class="market-grid"><div class="empty">Connect to load markets.</div></div></div></section>
+<section class="panel ai-card"><div class="panel-head"><span>⚡ MATCHES PREDICTION</span><span id="scanState" class="state">READY</span></div><div class="hero-signal"><div class="signal-label">SELECTED MATCH DIGIT</div><div id="mainDigit" class="main-digit">—</div><div id="mainStrength" class="confidence">—%</div><div id="mainMarket" class="main-market">Scan the selected markets</div></div><div class="stats-grid"><div><span>STRENGTH</span><strong id="statStrength">—</strong></div><div><span>EVIDENCE</span><strong id="statEvidence">—</strong></div><div><span>RECENT</span><strong id="statRecent">—</strong></div><div><span>SAMPLE</span><strong id="statSample">—</strong></div></div><div id="tradeState" class="trade-state wait">WAIT</div><button id="scanBtn" class="btn primary wide" disabled>Analyze Matches</button><div id="scanProgress" class="scan-progress hidden"><div class="progress-top"><strong>Scanning live ticks…</strong><strong id="scanSeconds">25s</strong></div><div class="progress-track"><div id="progressBar" class="progress-bar"></div></div><div class="feed-message">Building the frozen signal. It will not change while you switch to Deriv Bot.</div></div></section>
+<section class="panel distribution"><div class="panel-head"><span>◉ LAST DIGIT DISTRIBUTION</span><span id="distributionMarket">—</span></div><div id="digitBoard" class="digit-board"></div><div class="legend"><span>💚 Most appearing</span><span>💙 2nd highest</span><span>❤️ Least appearing</span><span>🧡 2nd least</span></div></section>
+<section class="panel result-panel"><div class="panel-head"><span>🔒 FROZEN SIGNAL</span><span id="frozenAt">Not generated</span></div><div id="frozenText" class="frozen-text">No frozen signal yet.</div><div class="small-note">Strength is a scanner score, not a guaranteed next-tick win probability. TRADE NOW is shown only at <b>75%+</b>.</div></section>
+<section class="panel api-panel"><div class="panel-head"><span>🔐 DERIV API / BOT MONITOR</span><span id="apiStatus" class="status-badge">NOT CONNECTED</span></div><label>Deriv API token<input id="token" type="password" autocomplete="off" placeholder="Enter locally — never stored in GitHub"></label><label>App ID<input id="appId" inputmode="numeric" placeholder="App ID"></label><label>Account ID<input id="accountId" autocomplete="off" placeholder="Account ID"></label><div class="stats-grid connection-grid"><div><span>MARKET DATA</span><strong id="marketStatus2">OFFLINE</strong></div><div><span>DERIV API</span><strong id="apiStatus2">OFFLINE</strong></div><div><span>BOT MONITOR</span><strong id="botStatus">OFFLINE</strong></div></div><button id="apiConnectBtn" class="btn primary wide">Connect Deriv API</button><button id="apiDisconnectBtn" class="btn dark wide" disabled>Disconnect API</button><div id="apiMessage" class="small-note">The API connection monitors contracts opened manually in Deriv Bot. It does not place trades.</div></section>
+</main><script src="app.js"></script></body></html>
