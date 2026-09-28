@@ -129,8 +129,14 @@ function renderSignal(r){
  $("distributionMarket").textContent=r.name;$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard(r.counts);
 }
 function renderBoard(c){
+ const total=c.reduce((a,b)=>a+b,0);
  const rank=c.map((n,d)=>({d,n})).sort((a,b)=>b.n-a.n||a.d-b.d),top=rank[0].d,second=rank[1].d,low=rank[9].d,secondLow=rank[8].d;
- $("digitBoard").innerHTML=c.map((n,d)=>{let cl="",m="";if(d===top){cl="top";m="💚"}else if(d===second){cl="second";m="💙"}else if(d===low){cl="low";m="❤️"}else if(d===secondLow){cl="second-low";m="🧡"}return '<div class="digit-tile '+cl+'"><span class="digit-mark">'+m+'</span><div class="num">'+d+'</div><small>'+n+'×</small></div>'}).join("");
+ $("digitBoard").innerHTML=c.map((n,d)=>{
+   let cl="",m="";
+   if(d===top){cl="top";m="💚"}else if(d===second){cl="second";m="💙"}else if(d===low){cl="low";m="❤️"}else if(d===secondLow){cl="second-low";m="🧡"}
+   const pct=total?((n/total)*100).toFixed(1):"0.0";
+   return '<div class="digit-tile '+cl+'"><span class="digit-mark">'+m+'</span><div class="num">'+d+'</div><small>'+n+'× • '+pct+'%</small></div>';
+ }).join("");
 }
 async function connectApi(){
  const token=$("token").value.trim(),app=$("appId").value.trim(),acct=$("accountId").value.trim();
