@@ -116,19 +116,35 @@ function renderMarkets(){
 function chooseResult(){
  let best=null;
  for(const s of state.selected){
-   const a=state.ticks.get(s)||[]; if(a.length<30)continue;
+   const a=state.ticks.get(s)||[]; if(a.length<60)continue;
    const counts=Array(10).fill(0);a.forEach(x=>counts[x.digit]++);
-   const recent=a.slice(-30);
+   const recent=a.slice(-20);
+   const prior=a.slice(-60,-20);
+   const lastDigit=a[a.length-1]?.digit;
    const candidates=counts.map((n,d)=>{
-     const share=n/a.length;
-     const recentShare=recent.filter(x=>x.digit===d).length/30;
-     const score=share*0.55+recentShare*0.45;
-     return {d,n,share,recentShare,score};
-   }).sort((x,y)=>y.score-x.score||y.share-x.share||y.n-x.n);
-   const top=candidates[0];
-   const second=candidates[1];
-   const strength=Math.min(95,Math.round(50+Math.max(0,top.score-second.score)*180+Math.max(0,top.recentShare-.1)*45));
-   const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,evidence:+(top.share*100).toFixed(2),recent:+(top.recentShare*100).toFixed(2),sample:a.length,counts,generated:new Date()};
+     const overall=n/a.length;
+     const recentCount=recent.filter(x=>x.digit===d).length;
+     const priorCount=prior.filter(x=>x.digit===d).length;
+     const recentShare=recentCount/20;
+     const priorShare=priorCount/40;
+     const momentum=recentShare-priorShare;
+     const positions=[];
+     for(let i=a.length-1;i>=0&&positions.length<8;i--) if(a[i].digit===d) positions.push(a.length-1-i);
+     const gap=positions.length?positions[0]:60;
+     const avgGap=positions.length>1?positions.slice(1).reduce((sum,v,i)=>sum+(v-positions[i]),0)/(positions.length-1):gap;
+     const gapFit=Math.max(0,1-Math.abs(gap-Math.max(1,avgGap))/Math.max(5,avgGap));
+     const notRepeat=d!==lastDigit?1:0;
+     // Candidate score is deliberately NOT a frequency ranking.
+     // Frequency is only 15%; recency/momentum, spacing and non-repeat contribute separately.
+     const score=overall*0.15+recentShare*0.35+Math.max(0,momentum)*0.25+gapFit*0.20+notRepeat*0.05;
+     return {d,n,overall,recentShare,momentum,gap,gapFit,score};
+   }).sort((x,y)=>y.score-x.score||y.momentum-x.momentum||y.gapFit-x.gapFit);
+   const top=candidates[0],second=candidates[1];
+   const strength=Math.min(95,Math.max(50,Math.round(50+(top.score-second.score)*100)));
+   const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,
+     evidence:+(top.overall*100).toFixed(2),recent:+(top.recentShare*100).toFixed(2),
+     sample:a.length,counts,generated:new Date(),
+     method:"Composite candidate score (frequency 15%, recent 35%, momentum 25%, spacing 20%, non-repeat 5%)"};
    if(!best||r.strength>best.strength)best=r;
  }
  return best;
