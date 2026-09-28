@@ -7,7 +7,7 @@ const FALLBACK_MARKETS=[
 ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
 ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]];
 const $=id=>document.getElementById(id);
-const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set()};
+const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null};
 const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
 const marketsEl=$("markets"),marketsWrap=$("marketsWrap"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
 const scanProgress=$("scanProgress"),scanSeconds=$("scanSeconds"),progressBar=$("progressBar"),scanState=$("scanState");
@@ -91,6 +91,20 @@ function updateTicks(){
  $("tickCount").textContent=total+" ticks";
  const ready=[...state.ticks.values()].filter(a=>a.length>=30).length;
  $("marketSummary").textContent=ready+" ready";
+
+ // Keep the distribution LIVE even after a signal is frozen.
+ // The frozen signal remains unchanged, while this board follows incoming ticks.
+ const symbol=state.distributionSymbol||state.frozen?.symbol||[...state.selected][0];
+ if(symbol){
+   state.distributionSymbol=symbol;
+   const live=state.ticks.get(symbol)||[];
+   const marketName=MARKETS.find(x=>x[0]===symbol)?.[1]||symbol;
+   $("distributionMarket").textContent=marketName+" • LIVE";
+   renderBoard(live.map(x=>x.digit));
+   const stream=live.slice(-9).map(x=>x.digit).join("");
+   $("liveDigitStream").textContent=stream||"—";
+   $("liveDigitCount").textContent=live.length+" ticks in window";
+ }
 }
 function renderMarkets(){
  marketsEl.innerHTML=MARKETS.map(([s,n])=>'<label class="market"><input type="checkbox" data-s="'+s+'" '+(state.selected.has(s)?"checked":"")+'> '+n+'</label>').join("");
@@ -132,7 +146,7 @@ function renderSignal(r){
  $("mainDigit").textContent=r.digit;$("mainStrength").textContent=r.strength+"%";$("mainMarket").textContent=r.name;
  $("statStrength").textContent=r.strength+"%";$("statEvidence").textContent=r.evidence+"%";$("statRecent").textContent=r.recent+"%";$("statSample").textContent=r.sample;
  $("tradeState").textContent=trade?"TRADE NOW ≥ 75%":"WAIT";$("tradeState").className="trade-state "+(trade?"trade":"wait");
- $("distributionMarket").textContent=r.name;$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard(r.counts);
+ $("distributionMarket").textContent=r.name+" • LIVE";$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard((state.ticks.get(r.symbol)||[]).map(x=>x.digit));
 }
 function renderBoard(c){
  const total=c.reduce((a,b)=>a+b,0);
