@@ -104,11 +104,17 @@ function chooseResult(){
  for(const s of state.selected){
    const a=state.ticks.get(s)||[]; if(a.length<30)continue;
    const counts=Array(10).fill(0);a.forEach(x=>counts[x.digit]++);
-   const ranked=counts.map((c,d)=>({d,c})).sort((x,y)=>y.c-x.c||x.d-y.d);
-   const top=ranked[0],second=ranked[1],recent=a.slice(-30);
-   const recentShare=recent.filter(x=>x.digit===top.d).length/30,share=top.c/a.length,dominance=share-second.c/a.length;
-   const strength=Math.min(95,Math.round(50+dominance*120+Math.max(0,recentShare-.1)*80));
-   const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,evidence:+(share*100).toFixed(2),recent:+(recentShare*100).toFixed(2),sample:a.length,counts,generated:new Date()};
+   const recent=a.slice(-30);
+   const candidates=counts.map((n,d)=>{
+     const share=n/a.length;
+     const recentShare=recent.filter(x=>x.digit===d).length/30;
+     const score=share*0.55+recentShare*0.45;
+     return {d,n,share,recentShare,score};
+   }).sort((x,y)=>y.score-x.score||y.share-x.share||y.n-x.n);
+   const top=candidates[0];
+   const second=candidates[1];
+   const strength=Math.min(95,Math.round(50+Math.max(0,top.score-second.score)*180+Math.max(0,top.recentShare-.1)*45));
+   const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,evidence:+(top.share*100).toFixed(2),recent:+(top.recentShare*100).toFixed(2),sample:a.length,counts,generated:new Date()};
    if(!best||r.strength>best.strength)best=r;
  }
  return best;
