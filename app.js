@@ -89,7 +89,7 @@ function lastDigit(v){
 }
 function updateTicks(){
  const total=[...state.ticks.values()].reduce((n,a)=>n+a.length,0);
- $("tickCount").textContent=total+" ticks";
+ $("tickCount").textContent=total+" ticks in rolling window";
  const ready=[...state.ticks.values()].filter(a=>a.length>=30).length;
  $("marketSummary").textContent=ready+" ready";
 
