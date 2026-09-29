@@ -164,10 +164,23 @@ function renderSignal(r){
  $("tradeState").textContent=trade?"TRADE NOW ≥ 75%":"WAIT";$("tradeState").className="trade-state "+(trade?"trade":"wait");
  $("distributionMarket").textContent=r.name+" • LIVE";$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard((state.ticks.get(r.symbol)||[]).map(x=>x.digit));
 }
-function renderBoard(c){
- const total=c.reduce((a,b)=>a+b,0);
- const rank=c.map((n,d)=>({d,n})).sort((a,b)=>b.n-a.n||a.d-b.d),top=rank[0].d,second=rank[1].d,low=rank[9].d,secondLow=rank[8].d;
- $("digitBoard").innerHTML=c.map((n,d)=>{
+function renderBoard(data){
+ // The board is ALWAYS exactly digits 0–9.
+ // Accept either a 10-item count array or a live array of digit values.
+ let counts;
+ if(Array.isArray(data)&&data.length===10){
+   counts=data.map(Number);
+ }else{
+   counts=Array(10).fill(0);
+   (data||[]).forEach(v=>{
+     const d=Number(v);
+     if(Number.isInteger(d)&&d>=0&&d<=9)counts[d]++;
+   });
+ }
+ const total=counts.reduce((a,b)=>a+b,0);
+ const rank=counts.map((n,d)=>({d,n})).sort((a,b)=>b.n-a.n||a.d-b.d);
+ const top=rank[0].d,second=rank[1].d,low=rank[9].d,secondLow=rank[8].d;
+ $("digitBoard").innerHTML=counts.map((n,d)=>{
    let cl="",m="";
    if(d===top){cl="top";m="💚"}else if(d===second){cl="second";m="💙"}else if(d===low){cl="low";m="❤️"}else if(d===secondLow){cl="second-low";m="🧡"}
    const pct=total?((n/total)*100).toFixed(1):"0.0";
