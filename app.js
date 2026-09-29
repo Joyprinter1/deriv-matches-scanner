@@ -7,7 +7,7 @@ const FALLBACK_MARKETS=[
 ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
 ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]];
 const $=id=>document.getElementById(id);
-const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null,botArmed:false,armedSignal:null,pendingContracts:new Map(),apiEnvironment:"—"};
+const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null,botArmed:false,armedSignal:null,pendingContracts:new Map(),apiEnvironment:"—",apiCreds:null,apiManualDisconnect:false,apiReconnectTimer:null,marketReconnectTimer:null,marketManualDisconnect:false};
 const activateBotBtn=$("activateBotBtn"),deactivateBotBtn=$("deactivateBotBtn");
 const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
 const marketsEl=$("markets"),marketsWrap=$("marketsWrap"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
@@ -27,6 +27,8 @@ function setFeed(on,msg){
 }
 function send(o){if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send(JSON.stringify(o));}
 function connect(){
+ state.marketManualDisconnect=false;
+ if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}
  if(state.ws)try{state.ws.close()}catch(e){}
  state.connected=false;
  feedMessage.textContent="Connecting to Deriv live market data…";
@@ -45,7 +47,7 @@ function connect(){
    setFeed(false,wasConnected?"Market connection closed. Tap Connect to retry.":"WebSocket could not establish a live connection (code "+(ev.code||"unknown")+").");
  };
 }
-function disconnect(){if(state.ws)try{state.ws.close()}catch(e){}state.ws=null;setFeed(false,"Disconnected.");}
+function disconnect(){state.marketManualDisconnect=true;if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}if(state.ws)try{state.ws.close()}catch(e){}state.ws=null;setFeed(false,"Disconnected.");}
 function loadMarkets(list){
  const found=list.filter(x=>{
    const name=String(x.underlying_symbol_name||"");
@@ -269,8 +271,11 @@ function verifyContract(p){
  if(unknown.length)return {status:"PARTIAL VERIFY",detail:"Type/market/digit could not all be confirmed from the available contract fields: "+unknown.map(x=>x[0]).join(", ")};
  return {status:"VERIFIED",detail:"DIGITMATCH • "+s.name+" • digit "+s.digit};
 }
-async function connectApi(){
- const token=$("token").value.trim(),app=$("appId").value.trim(),acct=$("accountId").value.trim();
+async function connectApi(opts={}){
+ const token=opts.token||$("token").value.trim(),app=opts.app||$("appId").value.trim(),acct=opts.acct||$("accountId").value.trim();
+ if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return;}
+ state.apiCreds={token,app,acct};
+ state.apiManualDisconnect=false;
  if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return;}
  $("apiMessage").textContent="Authenticating…";apiConnectBtn.disabled=true;
  try{
@@ -294,8 +299,18 @@ async function connectApi(){
      state.apiWs.send(JSON.stringify({balance:1,subscribe:1}));
    };
    state.apiWs.onmessage=e=>{try{apiMessage(JSON.parse(e.data))}catch(_){setApiDiagnostic("Unreadable API message");}};
-   state.apiWs.onclose=()=>disconnectApi();
-   state.apiWs.onerror=()=>{$("apiMessage").textContent="Deriv Bot monitor WebSocket error.";setApiDiagnostic("WebSocket error");};
+   state.apiWs.onclose=()=>{
+     state.apiWs=null;
+     if(state.apiManualDisconnect){disconnectApi(true);return;}
+     $("apiStatus").textContent="RECONNECTING…";$("apiStatus").className="status-badge";
+     $("apiStatus2").textContent="RECONNECTING…";$("apiStatus2").className="";
+     $("botStatus").textContent="Reconnecting authenticated monitor…";$("botStatus").className="";
+     $("apiMessage").textContent=document.hidden?"Monitor paused while app was in background. It will reconnect when you return.":"Authenticated monitor lost. Reconnecting…";
+     setApiDiagnostic("WebSocket disconnected — reconnect pending");
+     clearTimeout(state.apiReconnectTimer);
+     state.apiReconnectTimer=setTimeout(()=>{if(state.apiCreds&&!state.apiManualDisconnect)connectApi(state.apiCreds)},3000);
+   };
+   state.apiWs.onerror=()=>{$("apiMessage").textContent="Deriv Bot monitor WebSocket error. Reconnect will be attempted automatically.";setApiDiagnostic("WebSocket error");};
  }catch(e){
    $("apiMessage").textContent=e.message||"API connection failed";
    $("apiEnvironment").textContent="—";$("apiAccount").textContent="—";apiConnectBtn.disabled=false;
@@ -351,7 +366,10 @@ function watchContract(c){
    state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1}));
  }
 }
-function disconnectApi(){
+function disconnectApi(fromSocket=false){
+ if(!fromSocket)state.apiManualDisconnect=true;
+ if(state.apiReconnectTimer){clearTimeout(state.apiReconnectTimer);state.apiReconnectTimer=null;}
+ if(!fromSocket)state.apiCreds=null;
  $("apiStatus").textContent="NOT CONNECTED";$("apiStatus").className="status-badge";
  $("apiStatus2").textContent="OFFLINE";$("apiStatus2").className="";
  $("botStatus").textContent="OFFLINE";$("botStatus").className="";
@@ -360,7 +378,24 @@ function disconnectApi(){
  $("apiEnvironment").textContent="—";$("apiAccount").textContent="—";
  setApiDiagnostic("Disconnected","—");
  apiConnectBtn.disabled=false;apiDisconnectBtn.disabled=true;
- if(state.apiWs)try{state.apiWs.close()}catch(e){}state.apiWs=null;
+ if(state.apiWs){const w=state.apiWs;state.apiWs=null;try{w.close()}catch(e){}}
+}
+function resumeConnections(){
+ if(document.hidden)return;
+ if(state.marketManualDisconnect===false && (!state.ws||state.ws.readyState!==WebSocket.OPEN)){
+   clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=setTimeout(()=>connect(),250);
+ }
+ if(state.apiCreds && (!state.apiWs||state.apiWs.readyState!==WebSocket.OPEN)){
+   clearTimeout(state.apiReconnectTimer);
+   $("apiMessage").textContent="Returning to analyzer. Re-authenticating API monitor…";
+   state.apiReconnectTimer=setTimeout(()=>connectApi(state.apiCreds),250);
+ }
+}
+function pauseConnections(){
+ if(state.ws&&state.ws.readyState===WebSocket.OPEN){try{state.ws.close()}catch(e){}}
+ if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN){try{state.apiWs.close()}catch(e){}}
+ if(state.apiCreds)$("apiMessage").textContent="API monitor paused while analyzer is in the background. It will reconnect when you return.";
+ if(state.connected)feedMessage.textContent="Market feed paused in background. It will reconnect when you return.";
 }
 function init(){
  MARKETS=[...FALLBACK_MARKETS];state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();
@@ -368,6 +403,10 @@ function init(){
  selectAllBtn.onclick=()=>{state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();scanBtn.disabled=!state.connected};
  clearAllBtn.onclick=()=>{state.selected.clear();renderMarkets();scanBtn.disabled=true};
  connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
- setBotUi();setTimeout(connect,500);
+ setBotUi();
+ document.addEventListener("visibilitychange",()=>document.hidden?pauseConnections():resumeConnections());
+ window.addEventListener("pageshow",resumeConnections);
+ window.addEventListener("focus",resumeConnections);
+ setTimeout(connect,500);
 }
 document.readyState==="loading"?document.addEventListener("DOMContentLoaded",init):init();
