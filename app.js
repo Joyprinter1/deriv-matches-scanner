@@ -7,7 +7,8 @@ const FALLBACK_MARKETS=[
 ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
 ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]];
 const $=id=>document.getElementById(id);
-const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null};
+const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null,botArmed:false,armedSignal:null,pendingContracts:new Map(),apiEnvironment:"—"};
+const activateBotBtn=$("activateBotBtn"),deactivateBotBtn=$("deactivateBotBtn");
 const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
 const marketsEl=$("markets"),marketsWrap=$("marketsWrap"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
 const scanProgress=$("scanProgress"),scanSeconds=$("scanSeconds"),progressBar=$("progressBar"),scanState=$("scanState");
@@ -157,12 +158,14 @@ async function scan(){
  const r=chooseResult();scanProgress.classList.add("hidden");scanState.textContent=r?"FROZEN":"NO SIGNAL";scanState.className="state";renderSignal(r);state.scanning=false;scanBtn.disabled=!state.connected||!state.selected.size;
 }
 function renderSignal(r){
+ state.frozen=r||null;
  if(!r){$("mainDigit").textContent="—";$("mainStrength").textContent="—%";$("mainMarket").textContent="Not enough live ticks";$("tradeState").textContent="WAIT";$("tradeState").className="trade-state wait";$("frozenText").textContent="No signal was generated.";return;}
  const trade=r.strength>=TRADE_THRESHOLD;
  $("mainDigit").textContent=r.digit;$("mainStrength").textContent=r.strength+"%";$("mainMarket").textContent=r.name;
  $("statStrength").textContent=r.strength+"%";$("statEvidence").textContent=r.evidence+"%";$("statRecent").textContent=r.recent+"%";$("statSample").textContent=r.sample;
  $("tradeState").textContent=trade?"TRADE NOW ≥ 75%":"WAIT";$("tradeState").className="trade-state "+(trade?"trade":"wait");
  $("distributionMarket").textContent=r.name+" • LIVE";$("frozenAt").textContent=r.generated.toLocaleTimeString();$("frozenText").textContent="MATCH "+r.digit+" • "+(trade?"TRADE NOW":"WAIT")+" • Frozen";renderBoard((state.ticks.get(r.symbol)||[]).map(x=>x.digit));
+ setBotUi();
 }
 function renderBoard(data){
  // The board is ALWAYS exactly digits 0–9.
@@ -187,6 +190,67 @@ function renderBoard(data){
    return '<div class="digit-tile '+cl+'"><span class="digit-mark">'+m+'</span><div class="num">'+d+'</div><small>'+n+'× • '+pct+'%</small></div>';
  }).join("");
 }
+function maskAccount(v){
+ const s=String(v||"");
+ return s.length>6?s.slice(0,3)+"•••"+s.slice(-3):s||"—";
+}
+function setApiDiagnostic(event,contractId){
+ if(event!==undefined)$("apiLastEvent").textContent=event;
+ if(contractId!==undefined)$("apiLastContract").textContent=contractId||"—";
+}
+function setBotUi(){
+ const r=state.frozen;
+ const canArm=!!r&&r.strength>=TRADE_THRESHOLD&&!state.botArmed;
+ $("botMarket").textContent=r?.name||"—";
+ $("botDigit").textContent=r?String(r.digit):"—";
+ $("botStrength").textContent=r?r.strength+"%":"—";
+ $("botDuration").textContent="1 tick";
+ $("botSyncStatus").textContent=state.botArmed?"ARMED":"NOT ARMED";
+ $("botSyncStatus").className="status-badge "+(state.botArmed?"online":"");
+ $("activateBotBtn").disabled=!canArm;
+ $("deactivateBotBtn").disabled=!state.botArmed;
+ $("botInstruction").textContent=state.botArmed
+   ? "ARMED. Open Deriv Bot manually with DIGITMATCH, this market, digit "+r.digit+", and your chosen duration. Then press Run."
+   : (r?(r.strength>=TRADE_THRESHOLD?"Ready to arm the frozen TRADE NOW signal.":"Signal is below the 75% TRADE NOW threshold; keep it unarmed."):"Generate a frozen signal first. This panel never places a trade.");
+}
+function activateBot(){
+ const r=state.frozen;
+ if(!r||r.strength<TRADE_THRESHOLD)return;
+ state.botArmed=true;
+ state.armedSignal={...r,armedAt:new Date()};
+ state.pendingContracts.clear();
+ $("botResult").textContent="BOT SYNC ARMED • Waiting for a manual Deriv Bot contract.";
+ setBotUi();
+}
+function deactivateBot(){
+ state.botArmed=false;
+ state.armedSignal=null;
+ state.pendingContracts.clear();
+ $("botResult").textContent="Bot sync stopped. No trade was placed by the analyzer.";
+ setBotUi();
+}
+function describeContract(p){
+ const type=String(p.contract_type||"");
+ const symbol=String(p.underlying_symbol||p.symbol||"");
+ const barrier=p.barrier??p.barrier_value??"";
+ const duration=p.duration??"";
+ return {type,symbol,barrier:barrier===""?null:String(barrier),duration};
+}
+function verifyContract(p){
+ const s=state.armedSignal;
+ if(!s)return {status:"UNARMED",detail:"No frozen signal was armed when the contract was detected."};
+ const c=describeContract(p);
+ const checks=[
+   ["TYPE",c.type==="DIGITMATCH",c.type||"not exposed"],
+   ["MARKET",c.symbol===s.symbol,c.symbol||"not exposed"],
+   ["DIGIT",c.barrier!==null&&String(c.barrier)===String(s.digit),c.barrier===null?"not exposed":c.barrier]
+ ];
+ const failed=checks.filter(x=>x[1]===false);
+ const unknown=checks.filter(x=>x[2]==="not exposed");
+ if(failed.length)return {status:"CONTRACT MISMATCH",detail:failed.map(x=>x[0]+"="+x[2]).join(" • ")};
+ if(unknown.length)return {status:"PARTIAL VERIFY",detail:"Type/market/digit could not all be confirmed from the available contract fields: "+unknown.map(x=>x[0]).join(", ")};
+ return {status:"VERIFIED",detail:"DIGITMATCH • "+s.name+" • digit "+s.digit};
+}
 async function connectApi(){
  const token=$("token").value.trim(),app=$("appId").value.trim(),acct=$("accountId").value.trim();
  if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return;}
@@ -194,30 +258,89 @@ async function connectApi(){
  try{
    const r=await fetch("https://api.derivws.com/trading/v1/options/accounts/"+encodeURIComponent(acct)+"/otp",{method:"POST",headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":app}});
    const d=await r.json();if(!r.ok||!d?.data?.url)throw Error(d?.error?.message||"Authentication failed");
-   state.apiWs=new WebSocket(d.data.url);
-   state.apiWs.onopen=()=>{$("apiStatus").textContent="CONNECTED";$("apiStatus").className="status-badge online";$("apiStatus2").textContent="ONLINE";$("apiStatus2").className="online";$("botStatus").textContent="Connected to Deriv Bot";$("botStatus").className="online";$("apiMessage").textContent="Connected to Deriv Bot monitor. Waiting for contracts opened manually in Deriv Bot.";apiDisconnectBtn.disabled=false;state.apiWs.send(JSON.stringify({portfolio:1}));state.apiWs.send(JSON.stringify({transaction:1,subscribe:1}));};
-   state.apiWs.onmessage=e=>{try{apiMessage(JSON.parse(e.data))}catch(_){}};state.apiWs.onclose=()=>disconnectApi();state.apiWs.onerror=()=>{$("apiMessage").textContent="Deriv Bot monitor WebSocket error.";};
- }catch(e){$("apiMessage").textContent=e.message||"API connection failed";apiConnectBtn.disabled=false;}
+   const wsUrl=String(d.data.url);
+   state.apiEnvironment=/\/real(?:\?|$)/i.test(wsUrl)?"REAL":/\/demo(?:\?|$)/i.test(wsUrl)?"DEMO":"UNKNOWN";
+   $("apiEnvironment").textContent=state.apiEnvironment;
+   $("apiAccount").textContent=maskAccount(acct);
+   setApiDiagnostic("OTP accepted");
+   state.apiWs=new WebSocket(wsUrl);
+   state.apiWs.onopen=()=>{
+     $("apiStatus").textContent="CONNECTED";$("apiStatus").className="status-badge online";
+     $("apiStatus2").textContent="ONLINE";$("apiStatus2").className="online";
+     $("botStatus").textContent="Connected • "+state.apiEnvironment;$("botStatus").className="online";
+     $("apiMessage").textContent="Authenticated monitor connected. Waiting for manual Deriv Bot contracts.";
+     $("apiDiagnostic").textContent="Authenticated "+state.apiEnvironment+" account. No trade is placed by this connection.";
+     apiConnectBtn.disabled=true;apiDisconnectBtn.disabled=false;
+     state.apiWs.send(JSON.stringify({portfolio:1}));
+     state.apiWs.send(JSON.stringify({transaction:1,subscribe:1}));
+     state.apiWs.send(JSON.stringify({balance:1,subscribe:1}));
+   };
+   state.apiWs.onmessage=e=>{try{apiMessage(JSON.parse(e.data))}catch(_){setApiDiagnostic("Unreadable API message");}};
+   state.apiWs.onclose=()=>disconnectApi();
+   state.apiWs.onerror=()=>{$("apiMessage").textContent="Deriv Bot monitor WebSocket error.";setApiDiagnostic("WebSocket error");};
+ }catch(e){
+   $("apiMessage").textContent=e.message||"API connection failed";
+   $("apiEnvironment").textContent="—";$("apiAccount").textContent="—";apiConnectBtn.disabled=false;
+ }
 }
 function apiMessage(d){
- if(d.error){$("apiMessage").textContent=d.error.message;return;}
- if(d.msg_type==="portfolio")(d.portfolio?.contracts||[]).forEach(c=>watchContract(c));
- if(d.msg_type==="transaction"&&d.transaction?.action==="buy"){
-   const id=String(d.transaction.contract_id||d.transaction.contract_id||"");
-   if(id)watchContract({contract_id:id,underlying_symbol:d.transaction.underlying_symbol});
+ if(d.error){$("apiMessage").textContent=d.error.message||"Deriv API error";setApiDiagnostic("API error");return;}
+ if(d.msg_type==="balance"){
+   const b=d.balance||{};
+   const cur=b.currency||"";
+   const amount=b.balance!==undefined?String(b.balance):"";
+   $("apiDiagnostic").textContent="Authenticated "+state.apiEnvironment+" • balance stream active"+(amount?" • "+amount+" "+cur:"");
+   return;
+ }
+ if(d.msg_type==="portfolio"){
+   const cs=d.portfolio?.contracts||[];
+   cs.forEach(c=>watchContract(c));
+   setApiDiagnostic("Portfolio received",cs[0]?.contract_id?String(cs[0].contract_id):undefined);
+   return;
+ }
+ if(d.msg_type==="transaction"){
+   const t=d.transaction||{};
+   const id=String(t.contract_id||"");
+   setApiDiagnostic((t.action||"transaction").toUpperCase(),id||undefined);
+   $("apiDiagnostic").textContent="Transaction received from authenticated account.";
+   if(t.action==="buy"&&id){
+     $("botResult").textContent="CONTRACT DETECTED • ID "+id;
+     state.pendingContracts.set(id,{detectedAt:new Date(),transaction:t});
+     watchContract({contract_id:id,underlying_symbol:t.underlying_symbol});
+   }
+   return;
  }
  if(d.msg_type==="proposal_open_contract"){
    const p=d.proposal_open_contract||{};
-   $("botStatus").textContent="Connected to Deriv Bot • "+(p.status||"OPEN");
+   const id=String(p.contract_id||"");
+   const verification=verifyContract(p);
+   if(id&&state.botArmed)state.pendingContracts.set(id,{...(state.pendingContracts.get(id)||{}),contract:p,verification});
+   $("botStatus").textContent="Connected • "+state.apiEnvironment+" • "+(p.status||"OPEN");
+   $("botStatus").className="online";
+   if(state.botArmed){
+     $("botResult").textContent=verification.status+" • "+verification.detail;
+     if(p.status==="won"||p.status==="lost"||p.is_sold===1){
+       const profit=p.profit!==undefined?String(p.profit):"";
+       $("botResult").textContent=verification.status+" • SETTLED "+(p.status||"")+" "+(profit?("• P/L "+profit):"");
+     }
+   }
  }
 }
 function watchContract(c){
- const id=String(c.contract_id||"");if(!id||state.contracts.has(id))return;
- state.contracts.add(id);
- if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN)state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1}));
+ const id=String(c.contract_id||"");if(!id)return;
+ if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN){
+   state.apiWs.send(JSON.stringify({proposal_open_contract:1,contract_id:id,subscribe:1}));
+ }
 }
 function disconnectApi(){
- $("apiStatus").textContent="NOT CONNECTED";$("apiStatus").className="status-badge";$("apiStatus2").textContent="OFFLINE";$("apiStatus2").className="";$("botStatus").textContent="OFFLINE";$("botStatus").className="";apiConnectBtn.disabled=false;apiDisconnectBtn.disabled=true;
+ $("apiStatus").textContent="NOT CONNECTED";$("apiStatus").className="status-badge";
+ $("apiStatus2").textContent="OFFLINE";$("apiStatus2").className="";
+ $("botStatus").textContent="OFFLINE";$("botStatus").className="";
+ $("apiMessage").textContent="API monitor disconnected.";
+ $("apiDiagnostic").textContent="No authenticated account event received.";
+ $("apiEnvironment").textContent="—";$("apiAccount").textContent="—";
+ setApiDiagnostic("Disconnected","—");
+ apiConnectBtn.disabled=false;apiDisconnectBtn.disabled=true;
  if(state.apiWs)try{state.apiWs.close()}catch(e){}state.apiWs=null;
 }
 function init(){
@@ -225,7 +348,7 @@ function init(){
  toggleMarketsBtn.onclick=()=>{marketsWrap.classList.toggle("hidden");toggleMarketsBtn.textContent=marketsWrap.classList.contains("hidden")?"Show markets":"Hide markets"};
  selectAllBtn.onclick=()=>{state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();scanBtn.disabled=!state.connected};
  clearAllBtn.onclick=()=>{state.selected.clear();renderMarkets();scanBtn.disabled=true};
- connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;
- setTimeout(connect,500);
+ connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
+ setBotUi();setTimeout(connect,500);
 }
 document.readyState==="loading"?document.addEventListener("DOMContentLoaded",init):init();
