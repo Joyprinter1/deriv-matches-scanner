@@ -200,7 +200,7 @@ function setApiDiagnostic(event,contractId){
 }
 function setBotUi(){
  const r=state.frozen;
- const canArm=!!r&&r.strength>=TRADE_THRESHOLD&&!state.botArmed;
+ const canArm=!state.botArmed;
  $("botMarket").textContent=r?.name||"—";
  $("botDigit").textContent=r?String(r.digit):"—";
  $("botStrength").textContent=r?r.strength+"%":"—";
@@ -215,7 +215,8 @@ function setBotUi(){
 }
 function activateBot(){
  const r=state.frozen;
- if(!r||r.strength<TRADE_THRESHOLD)return;
+ if(!r){$("botResult").textContent="No frozen signal yet. Tap Analyze Matches first.";return;}
+ if(r.strength<TRADE_THRESHOLD){$("botResult").textContent="Signal is below 75%. Bot Sync will not arm until a TRADE NOW signal is generated.";return;}
  state.botArmed=true;
  state.armedSignal={...r,armedAt:new Date()};
  state.pendingContracts.clear();
