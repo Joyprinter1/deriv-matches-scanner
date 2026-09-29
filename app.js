@@ -245,7 +245,7 @@ function verifyContract(p){
    ["MARKET",c.symbol===s.symbol,c.symbol||"not exposed"],
    ["DIGIT",c.barrier!==null&&String(c.barrier)===String(s.digit),c.barrier===null?"not exposed":c.barrier]
  ];
- const failed=checks.filter(x=>x[1]===false);
+ const failed=checks.filter(x=>x[1]===false&&x[2]!=="not exposed");
  const unknown=checks.filter(x=>x[2]==="not exposed");
  if(failed.length)return {status:"CONTRACT MISMATCH",detail:failed.map(x=>x[0]+"="+x[2]).join(" • ")};
  if(unknown.length)return {status:"PARTIAL VERIFY",detail:"Type/market/digit could not all be confirmed from the available contract fields: "+unknown.map(x=>x[0]).join(", ")};
@@ -313,11 +313,12 @@ function apiMessage(d){
  if(d.msg_type==="proposal_open_contract"){
    const p=d.proposal_open_contract||{};
    const id=String(p.contract_id||"");
+   const isPending=id&&state.pendingContracts.has(id);
    const verification=verifyContract(p);
-   if(id&&state.botArmed)state.pendingContracts.set(id,{...(state.pendingContracts.get(id)||{}),contract:p,verification});
    $("botStatus").textContent="Connected • "+state.apiEnvironment+" • "+(p.status||"OPEN");
    $("botStatus").className="online";
-   if(state.botArmed){
+   if(isPending&&state.botArmed){
+     state.pendingContracts.set(id,{...(state.pendingContracts.get(id)||{}),contract:p,verification});
      $("botResult").textContent=verification.status+" • "+verification.detail;
      if(p.status==="won"||p.status==="lost"||p.is_sold===1){
        const profit=p.profit!==undefined?String(p.profit):"";
