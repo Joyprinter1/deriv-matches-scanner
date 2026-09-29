@@ -7,7 +7,7 @@ const FALLBACK_MARKETS=[
 ["R_10","Volatility 10"],["R_25","Volatility 25"],["R_50","Volatility 50"],["R_75","Volatility 75"],["R_100","Volatility 100"],
 ["JD10","Jump 10"],["JD25","Jump 25"],["JD50","Jump 50"],["JD75","Jump 75"],["JD100","Jump 100"]];
 const $=id=>document.getElementById(id);
-const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null,botArmed:false,armedSignal:null,pendingContracts:new Map(),apiEnvironment:"—",apiCreds:null,apiManualDisconnect:false,apiReconnectTimer:null,marketReconnectTimer:null,marketManualDisconnect:false};
+const state={ws:null,connected:false,selected:new Set(),ticks:new Map(),scanning:false,apiWs:null,contracts:new Set(),frozen:null,distributionSymbol:null,botArmed:false,armedSignal:null,pendingContracts:new Map(),apiEnvironment:"—",apiCreds:null,apiManualDisconnect:false,apiReconnectTimer:null,marketReconnectTimer:null,marketManualDisconnect:false,apiConnecting:false,marketConnecting:false};
 const activateBotBtn=$("activateBotBtn"),deactivateBotBtn=$("deactivateBotBtn");
 const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
 const marketsEl=$("markets"),marketsWrap=$("marketsWrap"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
@@ -27,6 +27,8 @@ function setFeed(on,msg){
 }
 function send(o){if(state.ws&&state.ws.readyState===WebSocket.OPEN)state.ws.send(JSON.stringify(o));}
 function connect(){
+ if(state.marketConnecting||state.connected)return;
+ state.marketConnecting=true;
  state.marketManualDisconnect=false;
  if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}
  if(state.ws)try{state.ws.close()}catch(e){}
@@ -35,19 +37,21 @@ function connect(){
  connectBtn.disabled=true;
  state.ws=new WebSocket(WS_URL);
  state.ws.onopen=()=>{
+   state.marketConnecting=false;
    setFeed(true,"Connected. Loading available Volatility and Jump markets…");
    send({active_symbols:"brief",req_id:1});
  };
  state.ws.onmessage=e=>{try{handle(JSON.parse(e.data))}catch(err){feedMessage.textContent="Market-data message could not be read.";}}
  state.ws.onerror=()=>{feedMessage.textContent="WebSocket error. Check browser/network WebSocket access, then tap Connect again.";};
  state.ws.onclose=ev=>{
+   state.marketConnecting=false;
    const wasConnected=state.connected;
    state.connected=false;
    connectBtn.disabled=false;
    setFeed(false,wasConnected?"Market connection closed. Tap Connect to retry.":"WebSocket could not establish a live connection (code "+(ev.code||"unknown")+").");
  };
 }
-function disconnect(){state.marketManualDisconnect=true;if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}if(state.ws)try{state.ws.close()}catch(e){}state.ws=null;setFeed(false,"Disconnected.");}
+function disconnect(){state.marketManualDisconnect=true;state.marketConnecting=false;if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}if(state.ws)try{state.ws.close()}catch(e){}state.ws=null;setFeed(false,"Disconnected.");}
 function loadMarkets(list){
  const found=list.filter(x=>{
    const name=String(x.underlying_symbol_name||"");
@@ -272,6 +276,9 @@ function verifyContract(p){
  return {status:"VERIFIED",detail:"DIGITMATCH • "+s.name+" • digit "+s.digit};
 }
 async function connectApi(opts={}){
+ if(state.apiConnecting)return;
+ if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN)return;
+ state.apiConnecting=true;
  const token=opts.token||$("token").value.trim(),app=opts.app||$("appId").value.trim(),acct=opts.acct||$("accountId").value.trim();
  if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return;}
  state.apiCreds={token,app,acct};
@@ -314,6 +321,8 @@ async function connectApi(opts={}){
  }catch(e){
    $("apiMessage").textContent=e.message||"API connection failed";
    $("apiEnvironment").textContent="—";$("apiAccount").textContent="—";apiConnectBtn.disabled=false;
+ } finally {
+   state.apiConnecting=false;
  }
 }
 function apiMessage(d){
@@ -367,6 +376,7 @@ function watchContract(c){
  }
 }
 function disconnectApi(fromSocket=false){
+ state.apiConnecting=false;
  if(!fromSocket)state.apiManualDisconnect=true;
  if(state.apiReconnectTimer){clearTimeout(state.apiReconnectTimer);state.apiReconnectTimer=null;}
  if(!fromSocket)state.apiCreds=null;
@@ -382,6 +392,9 @@ function disconnectApi(fromSocket=false){
 }
 function resumeConnections(){
  if(document.hidden)return;
+ // Android/Chrome may suspend either WebSocket while Deriv Bot is in the foreground.
+ // On return, reuse the in-memory credentials and obtain a fresh authenticated WS OTP.
+ $("apiMessage").textContent=state.apiCreds?"Checking API monitor…":$("apiMessage").textContent;
  if(state.marketManualDisconnect===false && (!state.ws||state.ws.readyState!==WebSocket.OPEN)){
    clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=setTimeout(()=>connect(),250);
  }
@@ -392,6 +405,8 @@ function resumeConnections(){
  }
 }
 function pauseConnections(){
+ if(state.marketReconnectTimer){clearTimeout(state.marketReconnectTimer);state.marketReconnectTimer=null;}
+ if(state.apiReconnectTimer){clearTimeout(state.apiReconnectTimer);state.apiReconnectTimer=null;}
  if(state.ws&&state.ws.readyState===WebSocket.OPEN){try{state.ws.close()}catch(e){}}
  if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN){try{state.apiWs.close()}catch(e){}}
  if(state.apiCreds)$("apiMessage").textContent="API monitor paused while analyzer is in the background. It will reconnect when you return.";
