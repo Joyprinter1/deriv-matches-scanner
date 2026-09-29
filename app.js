@@ -308,7 +308,7 @@ async function connectApi(opts={}){
      $("apiMessage").textContent=document.hidden?"Monitor paused while app was in background. It will reconnect when you return.":"Authenticated monitor lost. Reconnecting…";
      setApiDiagnostic("WebSocket disconnected — reconnect pending");
      clearTimeout(state.apiReconnectTimer);
-     state.apiReconnectTimer=setTimeout(()=>{if(state.apiCreds&&!state.apiManualDisconnect)connectApi(state.apiCreds)},3000);
+     if(!document.hidden)state.apiReconnectTimer=setTimeout(()=>{if(state.apiCreds&&!state.apiManualDisconnect)connectApi(state.apiCreds)},3000);
    };
    state.apiWs.onerror=()=>{$("apiMessage").textContent="Deriv Bot monitor WebSocket error. Reconnect will be attempted automatically.";setApiDiagnostic("WebSocket error");};
  }catch(e){
