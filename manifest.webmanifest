@@ -1,0 +1,13 @@
+{
+  "name":"Matches AI • Last Digit Analysis",
+  "short_name":"Matches AI",
+  "start_url":"./",
+  "scope":"./",
+  "display":"standalone",
+  "background_color":"#08101d",
+  "theme_color":"#0b1322",
+  "description":"Matches-only live digit scanner with frozen signals and manual Deriv Bot execution.",
+  "icons":[
+    {"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
