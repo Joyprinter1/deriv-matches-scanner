@@ -114,38 +114,55 @@ function renderMarkets(){
    scanBtn.disabled=!state.connected||!state.selected.size;
  });
 }
+function clamp01(x){return Math.max(0,Math.min(1,x));}
 function chooseResult(){
  let best=null;
  for(const s of state.selected){
    const a=state.ticks.get(s)||[]; if(a.length<60)continue;
-   const counts=Array(10).fill(0);a.forEach(x=>counts[x.digit]++);
-   const recent=a.slice(-20);
-   const prior=a.slice(-60,-20);
-   const lastDigit=a[a.length-1]?.digit;
-   const candidates=counts.map((n,d)=>{
-     const overall=n/a.length;
-     const recentCount=recent.filter(x=>x.digit===d).length;
-     const priorCount=prior.filter(x=>x.digit===d).length;
-     const recentShare=recentCount/20;
-     const priorShare=priorCount/40;
-     const momentum=recentShare-priorShare;
-     const positions=[];
-     for(let i=a.length-1;i>=0&&positions.length<8;i--) if(a[i].digit===d) positions.push(a.length-1-i);
-     const gap=positions.length?positions[0]:60;
-     const avgGap=positions.length>1?positions.slice(1).reduce((sum,v,i)=>sum+(v-positions[i]),0)/(positions.length-1):gap;
-     const gapFit=Math.max(0,1-Math.abs(gap-Math.max(1,avgGap))/Math.max(5,avgGap));
-     const notRepeat=d!==lastDigit?1:0;
-     // Candidate score is deliberately NOT a frequency ranking.
-     // Frequency is only 15%; recency/momentum, spacing and non-repeat contribute separately.
-     const score=overall*0.15+recentShare*0.35+Math.max(0,momentum)*0.25+gapFit*0.20+notRepeat*0.05;
-     return {d,n,overall,recentShare,momentum,gap,gapFit,score};
-   }).sort((x,y)=>y.score-x.score||y.momentum-x.momentum||y.gapFit-x.gapFit);
+   const windows=[120,60,30,15].map(n=>Math.min(n,a.length));
+   const candidates=Array.from({length:10},(_,d)=>{
+     const rates=windows.map(n=>{
+       const slice=a.slice(-n);
+       const hits=slice.reduce((sum,x)=>sum+(x.digit===d?1:0),0);
+       // Light Bayesian smoothing keeps small samples from producing extreme scores.
+       return (hits+1)/(n+10);
+     });
+     const [p120,p60,p30,p15]=rates;
+     const blended=p120*0.30+p60*0.30+p30*0.25+p15*0.15;
+     const mean=rates.reduce((x,y)=>x+y,0)/rates.length;
+     const variance=rates.reduce((x,y)=>x+(y-mean)**2,0)/rates.length;
+     const consistency=clamp01(1-Math.sqrt(variance)/0.08);
+     const recencyLift=clamp01((p15-p120+0.03)/0.08);
+     const baseLift=clamp01((blended-0.10)/0.08);
+     return {d,p120,p60,p30,p15,blended,consistency,recencyLift,baseLift,score:blended};
+   }).sort((x,y)=>y.score-x.score||y.consistency-x.consistency);
    const top=candidates[0],second=candidates[1];
-   const strength=Math.min(95,Math.max(50,Math.round(50+(top.score-second.score)*100)));
-   const r={symbol:s,name:MARKETS.find(x=>x[0]===s)?.[1]||s,digit:top.d,strength,
-     evidence:+(top.overall*100).toFixed(2),recent:+(top.recentShare*100).toFixed(2),
-     sample:a.length,counts,generated:new Date(),
-     method:"Composite candidate score (frequency 15%, recent 35%, momentum 25%, spacing 20%, non-repeat 5%)"};
+   const separation=clamp01((top.blended-second.blended)/0.06);
+   // Calibrated quality score:
+   // 65% smoothed multi-window evidence, 15% cross-window consistency,
+   // 10% recent lift, 10% separation from the runner-up.
+   const quality=clamp01(
+     top.baseLift*0.65+
+     top.consistency*0.15+
+     top.recencyLift*0.10+
+     separation*0.10
+   );
+   // 75% now corresponds to a meaningful but reachable signal quality,
+   // rather than requiring an unusually large raw score gap.
+   const strength=Math.min(95,Math.max(50,Math.round(55+30*quality)));
+   const counts=Array(10).fill(0);a.forEach(x=>counts[x.digit]++);
+   const r={
+     symbol:s,
+     name:MARKETS.find(x=>x[0]===s)?.[1]||s,
+     digit:top.d,
+     strength,
+     evidence:+(top.p120*100).toFixed(2),
+     recent:+(top.p30*100).toFixed(2),
+     sample:a.length,
+     counts,
+     generated:new Date(),
+     method:"Calibrated score: 65% smoothed evidence + 15% consistency + 10% recent lift + 10% candidate separation"
+   };
    if(!best||r.strength>best.strength)best=r;
  }
  return best;
