@@ -306,7 +306,7 @@ async function discoverAccounts(){
     $("apiEnvironment").textContent=chosen.type==="real"?"REAL":chosen.type==="demo"?"DEMO":"—";
     $("apiAccount").textContent=maskAccount(chosen.id);
   }catch(e){
-    accountSelect.innerHTML="<option value="">Could not load accounts</option>";
+    accountSelect.innerHTML='<option value="">Could not load accounts</option>';
     $("accountListMessage").textContent=e.message||"Account lookup failed.";
     $("apiMessage").textContent="Account discovery failed: "+(e.message||"unknown error");
   }finally{
