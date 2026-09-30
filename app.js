@@ -12,7 +12,7 @@ const activateBotBtn=$("activateBotBtn"),deactivateBotBtn=$("deactivateBotBtn");
 const feedBadge=$("feedBadge"),feedMessage=$("feedMessage"),connectBtn=$("connectBtn"),disconnectBtn=$("disconnectBtn"),scanBtn=$("scanBtn");
 const marketsEl=$("markets"),marketsWrap=$("marketsWrap"),toggleMarketsBtn=$("toggleMarketsBtn"),selectAllBtn=$("selectAllBtn"),clearAllBtn=$("clearAllBtn");
 const scanProgress=$("scanProgress"),scanSeconds=$("scanSeconds"),progressBar=$("progressBar"),scanState=$("scanState");
-const apiConnectBtn=$("apiConnectBtn"),apiDisconnectBtn=$("apiDisconnectBtn");
+const apiConnectBtn=$("apiConnectBtn"),apiDisconnectBtn=$("apiDisconnectBtn"),findAccountsBtn=$("findAccountsBtn"),accountSelect=$("accountSelect");
 
 function setFeed(on,msg){
  state.connected=on;
@@ -275,11 +275,49 @@ function verifyContract(p){
  if(unknown.length)return {status:"PARTIAL VERIFY",detail:"Type/market/digit could not all be confirmed from the available contract fields: "+unknown.map(x=>x[0]).join(", ")};
  return {status:"VERIFIED",detail:"DIGITMATCH • "+s.name+" • digit "+s.digit};
 }
+async function discoverAccounts(){
+  const token=$("token").value.trim(),app=$("appId").value.trim();
+  if(!token||!app){$("accountListMessage").textContent="Enter your PAT token and App ID first.";return;}
+  findAccountsBtn.disabled=true;
+  accountSelect.disabled=true;
+  accountSelect.innerHTML="<option>Checking Deriv…</option>";
+  $("accountListMessage").textContent="Reading your Options accounts from Deriv…";
+  try{
+    const r=await fetch("https://api.derivws.com/trading/v1/options/accounts",{
+      method:"GET",
+      headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":app}
+    });
+    const d=await r.json();
+    if(!r.ok)throw Error(d?.errors?.[0]?.message||d?.error?.message||("Account lookup failed ("+r.status+")"));
+    const raw=Array.isArray(d?.data)?d.data:(Array.isArray(d?.data?.accounts)?d.data.accounts:Object.values(d?.data||{}).filter(x=>x&&typeof x==="object"));
+    const accounts=raw.map(x=>({
+      id:String(x.account_id||x.loginid||x.accountId||""),
+      type:String(x.account_type||x.type||"").toLowerCase(),
+      status:String(x.status||"")
+    })).filter(x=>x.id);
+    if(!accounts.length)throw Error("Deriv returned no Options accounts for this token.");
+    accountSelect.innerHTML=accounts.map(x=>'<option value="'+x.id+'">'+(x.type==="real"?"REAL":"DEMO")+' • '+x.id+(x.status?(" • "+x.status):"")+'</option>').join("");
+    accountSelect.disabled=false;
+    const real=accounts.find(x=>x.type==="real");
+    const chosen=real||accounts[0];
+    accountSelect.value=chosen.id;
+    $("accountId").value=chosen.id;
+    $("accountListMessage").textContent=accounts.length+" Options account"+(accounts.length===1?"":"s")+" found. "+(real?"Your REAL account is available.":"No REAL Options account was returned; only the accounts shown are available to this token.") ;
+    $("apiEnvironment").textContent=chosen.type==="real"?"REAL":chosen.type==="demo"?"DEMO":"—";
+    $("apiAccount").textContent=maskAccount(chosen.id);
+  }catch(e){
+    accountSelect.innerHTML="<option value="">Could not load accounts</option>";
+    $("accountListMessage").textContent=e.message||"Account lookup failed.";
+    $("apiMessage").textContent="Account discovery failed: "+(e.message||"unknown error");
+  }finally{
+    findAccountsBtn.disabled=false;
+  }
+}
 async function connectApi(opts={}){
  if(state.apiConnecting)return;
  if(state.apiWs&&state.apiWs.readyState===WebSocket.OPEN)return;
  state.apiConnecting=true;
- const token=opts.token||$("token").value.trim(),app=opts.app||$("appId").value.trim(),acct=opts.acct||$("accountId").value.trim();
+ const token=opts.token||$("token").value.trim(),app=opts.app||$("appId").value.trim(),acct=opts.acct||accountSelect?.value||$("accountId").value.trim()||"";
  if(!token||!app||!acct){$("apiMessage").textContent="Enter token, App ID and Account ID.";return;}
  state.apiCreds={token,app,acct};
  state.apiManualDisconnect=false;
@@ -287,7 +325,7 @@ async function connectApi(opts={}){
  $("apiMessage").textContent="Authenticating…";apiConnectBtn.disabled=true;
  try{
    const r=await fetch("https://api.derivws.com/trading/v1/options/accounts/"+encodeURIComponent(acct)+"/otp",{method:"POST",headers:{"Authorization":"Bearer "+token,"Deriv-App-ID":app}});
-   const d=await r.json();if(!r.ok||!d?.data?.url)throw Error(d?.error?.message||"Authentication failed");
+   const d=await r.json();if(!r.ok||!d?.data?.url)throw Error(d?.errors?.[0]?.message||d?.error?.message||("Authentication failed ("+r.status+")"));
    const wsUrl=String(d.data.url);
    state.apiEnvironment=/\/real(?:\?|$)/i.test(wsUrl)?"REAL":/\/demo(?:\?|$)/i.test(wsUrl)?"DEMO":"UNKNOWN";
    $("apiEnvironment").textContent=state.apiEnvironment;
@@ -417,7 +455,7 @@ function init(){
  toggleMarketsBtn.onclick=()=>{marketsWrap.classList.toggle("hidden");toggleMarketsBtn.textContent=marketsWrap.classList.contains("hidden")?"Show markets":"Hide markets"};
  selectAllBtn.onclick=()=>{state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();scanBtn.disabled=!state.connected};
  clearAllBtn.onclick=()=>{state.selected.clear();renderMarkets();scanBtn.disabled=true};
- connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
+ connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;findAccountsBtn.onclick=discoverAccounts;accountSelect.onchange=()=>{$("accountId").value=accountSelect.value;};apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
  setBotUi();
  document.addEventListener("visibilitychange",()=>document.hidden?pauseConnections():resumeConnections());
  window.addEventListener("pageshow",resumeConnections);
