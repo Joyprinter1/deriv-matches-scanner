@@ -278,7 +278,7 @@ function verifyContract(p){
 async function discoverAccounts(){
   const token=$("token").value.trim(),app=$("appId").value.trim();
   if(!token||!app){$("accountListMessage").textContent="Enter your PAT token and App ID first.";return;}
-  findAccountsBtn.disabled=true;
+  if(!findAccountsBtn||!accountSelect){$("apiMessage").textContent="Account discovery controls are not loaded yet. Refresh the page.";return;} findAccountsBtn.disabled=true;
   accountSelect.disabled=true;
   accountSelect.innerHTML="<option>Checking Deriv…</option>";
   $("accountListMessage").textContent="Reading your Options accounts from Deriv…";
@@ -455,7 +455,7 @@ function init(){
  toggleMarketsBtn.onclick=()=>{marketsWrap.classList.toggle("hidden");toggleMarketsBtn.textContent=marketsWrap.classList.contains("hidden")?"Show markets":"Hide markets"};
  selectAllBtn.onclick=()=>{state.selected=new Set(MARKETS.map(x=>x[0]));renderMarkets();scanBtn.disabled=!state.connected};
  clearAllBtn.onclick=()=>{state.selected.clear();renderMarkets();scanBtn.disabled=true};
- connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;findAccountsBtn.onclick=discoverAccounts;accountSelect.onchange=()=>{$("accountId").value=accountSelect.value;};apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
+ connectBtn.onclick=connect;disconnectBtn.onclick=disconnect;scanBtn.onclick=scan;if(findAccountsBtn)findAccountsBtn.onclick=discoverAccounts;if(accountSelect)accountSelect.onchange=()=>{$("accountId").value=accountSelect.value;};apiConnectBtn.onclick=connectApi;apiDisconnectBtn.onclick=disconnectApi;activateBotBtn.onclick=activateBot;deactivateBotBtn.onclick=deactivateBot;
  setBotUi();
  document.addEventListener("visibilitychange",()=>document.hidden?pauseConnections():resumeConnections());
  window.addEventListener("pageshow",resumeConnections);
